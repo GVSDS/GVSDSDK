@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gvsdsdk"
+version = "1.0.0"
+description = "GVSDS SDK — GVSDS 平台主从服务器间共享通信桥梁（gvsds 主服务器与子服务器共用）"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [
+    { name = "GVSDS Team" },
+]
+keywords = ["gvsds", "msync", "distributed", "sdk", "service-mesh"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: Other/Proprietary License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# 核心依赖
+dependencies = [
+    "Django>=4.2,<7.0",
+    "djangorestframework>=3.14",
+    "djangorestframework-simplejwt>=5.2",
+    "bcrypt>=4.0",
+    "cryptography>=41.0",
+    "Pillow>=10.0",
+    "requests>=2.28",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+client = [
+    # 子服务器需要 socketio + websocket-client
+    "python-socketio[client]>=5.0,<6.0",
+    "websocket-client>=1.5",
+]
+master = [
+    # 主服务器需要 socketio 服务端
+    "python-socketio[asyncio]>=5.0,<6.0",
+    "gevent>=22.0",
+    "gevent-websocket>=0.10",
+    "eventlet>=0.33",
+]
+
+[project.urls]
+Homepage = "https://www.gvsds.com"
+Documentation = "https://www.gvsds.com/docs/sdk"
+Repository = "https://github.com/gvsds/gvsdsdk"
+Issues = "https://github.com/gvsds/gvsdsdk/issues"
+
+[project.scripts]
+gvsdsdk = "gvsdsdk.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["gvsdsdk*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+gvsdsdk = ["README.md", "pyproject.toml"]
