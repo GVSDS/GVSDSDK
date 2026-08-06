@@ -231,6 +231,36 @@ class RoleManager:
                 return _apply()
         return _apply()
 
+    @staticmethod
+    def CreatePermission(PermCode, TenantUUID, PermName='', PermCategory='',
+                         PermStatus=1, PermDesc=''):
+        """创建权限（同租户内权限码唯一）
+
+        Args:
+            PermCode: 权限码
+            TenantUUID: 租户 UUID（UUIDObj/str/bytes 均可）
+            PermName: 权限名称（为空时回退到权限码）
+            PermCategory: 权限分类
+            PermStatus: 状态（1=启用）
+            PermDesc: 描述
+
+        Returns:
+            (Permission 实例, created: bool)；权限码已存在返回 (None, False)
+        """
+        if Permission.objects.filter(PermCode=PermCode, TenantUUID=TenantUUID).exists():
+            return None, False
+        perm = Permission(
+            PermUUID=uuid.uuid4().bytes,
+            TenantUUID=TenantUUID,
+            PermCode=PermCode,
+            PermName=PermName or PermCode,
+            PermCategory=PermCategory,
+            PermStatus=PermStatus,
+            PermDesc=PermDesc,
+        )
+        perm.save()
+        return perm, True
+
 
 class PositionManager:
     """职务管理器——提供人事职务标签创建、岗位模板管理"""
