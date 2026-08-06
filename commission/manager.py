@@ -166,6 +166,54 @@ class CommissionEngine:
         logger.info(f'费率表已创建: {table_code}@tenant={self.TenantUUID}')
         return table
 
+    def ListRules(self, event_type=None):
+        """列出租户下的分佣规则（仅启用，按优先级降序）
+
+        Args:
+            event_type: 可选，按事件类型过滤
+
+        Returns:
+            QuerySet[CommissionRule]
+        """
+        qs = CommissionRule.objects.filter(
+            TenantUUID=self.TenantUUID, RuleStatus=1,
+        )
+        if event_type:
+            qs = qs.filter(EventType=event_type)
+        return qs.order_by('-RulePriority')
+
+    def DisableRule(self, rule_uuid):
+        """软禁用分佣规则（RuleStatus=0）；返回是否命中"""
+        updated = CommissionRule.objects.filter(
+            TenantUUID=self.TenantUUID, RuleUUID=rule_uuid,
+        ).update(RuleStatus=0)
+        return updated > 0
+
+    def ListRateTables(self):
+        """列出租户下的费率表（仅启用）
+
+        Returns:
+            QuerySet[RateTable]
+        """
+        return RateTable.objects.filter(
+            TenantUUID=self.TenantUUID, TableStatus=1,
+        )
+
+    def ListEvents(self, event_type=None, limit=50):
+        """列出租户下的分佣事件（按创建时间倒序）
+
+        Args:
+            event_type: 可选，按事件类型过滤
+            limit: 返回条数上限
+
+        Returns:
+            QuerySet[CommissionEvent]
+        """
+        qs = CommissionEvent.objects.filter(TenantUUID=self.TenantUUID)
+        if event_type:
+            qs = qs.filter(EventType=event_type)
+        return qs.order_by('-CreateTime')[:limit]
+
     def Dispatch(self, event_type, event_key, total_amount,
                  source_user_uuid=None, participants=None,
                  tier_index=0, payload=None, auto_settle=True):

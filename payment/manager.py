@@ -160,6 +160,49 @@ class PaymentManager:
         logger.info(f'支付网关配置: {platform}@tenant={self.TenantUUID}')
         return config
 
+    def ListConfigs(self, status=None):
+        """列出租户下的支付网关配置（默认按默认渠道优先、平台名排序）
+
+        Args:
+            status: 可选，按配置状态过滤（1=启用，0=禁用）
+
+        Returns:
+            QuerySet[PaymentGatewayConfig]
+        """
+        qs = PaymentGatewayConfig.objects.filter(
+            TenantUUID=self.TenantUUID,
+        )
+        if status is not None:
+            qs = qs.filter(ConfigStatus=status)
+        return qs.order_by('-ConfigDefault', 'Platform')
+
+    def GetConfigByUUID(self, config_uuid):
+        """按 ConfigUUID 查询租户下的配置（不存在返回 None）"""
+        return PaymentGatewayConfig.objects.filter(
+            ConfigUUID=config_uuid, TenantUUID=self.TenantUUID,
+        ).first()
+
+    def DisableConfig(self, platform):
+        """禁用租户指定平台的配置（ConfigStatus=0 并清空更新时间）；返回是否命中"""
+        updated = PaymentGatewayConfig.objects.filter(
+            TenantUUID=self.TenantUUID, Platform=platform,
+        ).update(ConfigStatus=0, UpdateTime=None)
+        return updated > 0
+
+    def SetConfigStatus(self, config_uuid, status):
+        """更新租户指定配置的状态；返回是否命中"""
+        updated = PaymentGatewayConfig.objects.filter(
+            ConfigUUID=config_uuid, TenantUUID=self.TenantUUID,
+        ).update(ConfigStatus=status)
+        return updated > 0
+
+    def DeleteConfig(self, config_uuid):
+        """删除租户指定配置；返回是否命中"""
+        deleted, _ = PaymentGatewayConfig.objects.filter(
+            ConfigUUID=config_uuid, TenantUUID=self.TenantUUID,
+        ).delete()
+        return deleted > 0
+
     def Pay(self, platform, amount, subject='', body='',
             method='jsapi', open_id='', client_ip='',
             extra=None, expire_minutes=30):
