@@ -150,6 +150,11 @@ def _load_order():
     return _mod
 
 
+def _load_stats():
+    from gvsdsdk import stats as _mod
+    return _mod
+
+
 def _load_models():
     from gvsdsdk import models as _mod
     return _mod
@@ -262,6 +267,14 @@ _LAZY_SYMBOLS = {
     'Order': ('order', 'Order'),
     'OrderItem': ('order', 'OrderItem'),
 
+    # ── 统计引擎 ──────────────────────────────────────────
+    'StatsManager': ('stats', 'StatsManager'),
+    'StatMetric': ('stats', 'StatMetric'),
+    'StatDimension': ('stats', 'StatDimension'),
+    'StatRecord': ('stats', 'StatRecord'),
+    'StatRanking': ('stats', 'StatRanking'),
+    'StatConfig': ('stats', 'StatConfig'),
+
     # ── 数据模型 ──────────────────────────────────────────
     'User': ('models', 'User'),
     'Role': ('models', 'Role'),
@@ -304,6 +317,7 @@ _LOADERS = {
     'commission': _load_commission,
     'payment': _load_payment,
     'order': _load_order,
+    'stats': _load_stats,
     'models': _load_models,
     'fluent': _load_fluent,
     'model_base': _load_model_base,

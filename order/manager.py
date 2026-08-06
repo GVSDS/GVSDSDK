@@ -246,6 +246,100 @@ class OrderManager:
                     order_no, template.TemplateName, buyer_user_uuid)
         return order
 
+    @transaction.atomic
+    def CreateGeneric(self, order_title, buyer_user_uuid, order_type='default',
+                      order_description='', seller_user_uuid=None,
+                      total_amount=None, discount_amount=None, pay_amount=None,
+                      currency='CNY', expire_time=None, remark='',
+                      items=None, order_metadata=None):
+        """通用创建订单——自动生成单号、强制 PENDING 状态
+
+        供通用 CRUD（form_service）接入，替代裸 ``model.objects.create``，
+        保证订单受状态机保护（OrderStatus 恒为 PENDING，后续流转必须走状态机端点）。
+
+        Args:
+            order_title: 订单标题（必填）
+            buyer_user_uuid: 买家用户 UUID（必填）
+            order_type: 订单类型（默认 'default'）
+            order_description: 订单描述
+            seller_user_uuid: 卖家用户 UUID（可选）
+            total_amount: 总金额（Decimal/str；不传按 items 汇总，无 items 则为 0）
+            discount_amount: 优惠金额
+            pay_amount: 应付金额（不传 = total - discount，最低 0）
+            currency: 币种
+            expire_time: 过期时间
+            remark: 备注
+            items: 明细列表，每项 dict:
+                {ItemCode, ItemName, ItemDescription, ItemType, UnitPrice, Quantity, SubTotal, ItemMetadata}
+            order_metadata: 附加元数据
+
+        Returns:
+            Order 实例
+
+        Raises:
+            OrderError: order_title 或 buyer_user_uuid 缺失时
+        """
+        if not order_title:
+            raise OrderError('订单标题不能为空')
+        if not buyer_user_uuid:
+            raise OrderError('买家用户 UUID 不能为空')
+
+        buyer_bytes = self._to_bytes(buyer_user_uuid)
+        seller_bytes = self._to_bytes(seller_user_uuid) if seller_user_uuid else None
+        order_no = self._generate_order_no()
+
+        # 金额计算：优先显式传值，否则按 items 汇总
+        computed_total = Decimal('0')
+        for item in items or []:
+            computed_total += Decimal(str(item.get('UnitPrice', Decimal('0')))) * Decimal(str(item.get('Quantity', 1)))
+        total_amount = total_amount if total_amount is not None else (computed_total or Decimal('0'))
+        discount_amount = discount_amount or Decimal('0')
+        pay_amount = pay_amount if pay_amount is not None else max(total_amount - discount_amount, Decimal('0'))
+
+        order = Order.objects.create(
+            OrderUUID=_uuid.uuid4().bytes,
+            TenantUUID=self.TenantUUID,
+            CompanyUUID=self.CompanyUUID,
+            OrderNO=order_no,
+            OrderTitle=order_title,
+            OrderDescription=order_description,
+            OrderType=order_type,
+            BuyerUserUUID=buyer_bytes,
+            SellerUserUUID=seller_bytes,
+            TotalAmount=total_amount,
+            DiscountAmount=discount_amount,
+            PayAmount=pay_amount,
+            Currency=currency,
+            OrderStatus=Order.ORD_PENDING,
+            ExpireTime=expire_time,
+            TemplateSnapshot={},
+            LevelSnapshot={},
+            OrderMetadata=order_metadata or {},
+            Remark=remark,
+        )
+
+        item_list = []
+        for item_data in items or []:
+            unit_price = Decimal(str(item_data.get('UnitPrice', Decimal('0'))))
+            quantity = int(item_data.get('Quantity', 1))
+            item_list.append(OrderItem(
+                ItemUUID=_uuid.uuid4().bytes,
+                Order=order,
+                ItemCode=item_data.get('ItemCode', ''),
+                ItemName=item_data.get('ItemName', ''),
+                ItemDescription=item_data.get('ItemDescription', ''),
+                ItemType=item_data.get('ItemType', 'default'),
+                UnitPrice=unit_price,
+                Quantity=quantity,
+                Subtotal=item_data.get('SubTotal') or (unit_price * quantity),
+                ItemMetadata=item_data.get('ItemMetadata', {}),
+            ))
+        if item_list:
+            OrderItem.objects.bulk_create(item_list)
+
+        logger.info('[OrderManager] 通用创建订单: %s (buyer=%s)', order_no, buyer_user_uuid)
+        return order
+
     # ========== 状态流转方法 ==========
 
     def Confirm(self, order_uuid):

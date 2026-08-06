@@ -261,6 +261,84 @@ class RoleManager:
         perm.save()
         return perm, True
 
+    @staticmethod
+    def GetPermissionsTree(RoleUUID, CompanyUUID, TenantUUID=None):
+        """获取角色权限树——按 PermCategory 分组，标记角色+公司下已勾选权限
+
+        Args:
+            RoleUUID: 角色 UUID
+            CompanyUUID: 公司 UUID
+            TenantUUID: 可选，租户 UUID（过滤权限范围；传 None 表示跨租户全量）
+
+        Returns:
+            list[dict]：分组列表，每组含 ``Category`` 与 ``Permissions``
+            （每项含 PermUUID/PermName/PermCode/PermDesc/Checked）；未分类组排在最后
+        """
+        perm_qs = Permission.objects.filter(PermStatus=1)
+        if TenantUUID is not None:
+            perm_qs = perm_qs.filter(TenantUUID=TenantUUID)
+        perm_qs = perm_qs.order_by('PermCategory', 'PermName')
+
+        checked_perm_uuids = set(
+            RolePermission.objects.filter(
+                RoleUUID=RoleUUID, CompanyUUID=CompanyUUID,
+            ).values_list('PermUUID', flat=True)
+        )
+
+        groups = {}
+        for perm in perm_qs:
+            category = perm.PermCategory or '未分类'
+            if category not in groups:
+                groups[category] = {'Category': category, 'Permissions': []}
+            groups[category]['Permissions'].append({
+                'PermUUID': UUIDObj(perm.PermUUID).str if perm.PermUUID else '',
+                'PermName': perm.PermName,
+                'PermCode': perm.PermCode,
+                'PermDesc': perm.PermDesc or '',
+                'Checked': perm.PermUUID in checked_perm_uuids,
+            })
+
+        result = [g for k, g in groups.items() if k != '未分类']
+        if '未分类' in groups:
+            result.append(groups['未分类'])
+        return result
+
+    @staticmethod
+    def MatchUserRoleIds(Keyword):
+        """按用户名或角色名匹配关键字，返回对应的 UserUUID/RoleUUID 集合
+
+        供用户-角色关联搜索使用：先解析名称得到 UUID 集合，再在已隔离的
+        queryset 上按集合过滤（隔离语义由调用方 queryset 保留）。
+
+        Args:
+            Keyword: 用户名/角色名关键字
+
+        Returns:
+            (user_uuids: set[bytes], role_uuids: set[bytes])
+        """
+        if not Keyword:
+            return set(), set()
+        User = _GetUserModel()
+        matched_users = User.objects.filter(
+            UserName__icontains=Keyword,
+        ).values_list('UserUUID', flat=True)
+        matched_roles = Role.objects.filter(
+            RoleName__icontains=Keyword,
+        ).values_list('RoleUUID', flat=True)
+        user_uuids = set()
+        role_uuids = set()
+        for u in matched_users:
+            try:
+                user_uuids.add(UUIDObj(u).bytes)
+            except (ValueError, AttributeError):
+                pass
+        for r in matched_roles:
+            try:
+                role_uuids.add(UUIDObj(r).bytes)
+            except (ValueError, AttributeError):
+                pass
+        return user_uuids, role_uuids
+
 
 class PositionManager:
     """职务管理器——提供人事职务标签创建、岗位模板管理"""
