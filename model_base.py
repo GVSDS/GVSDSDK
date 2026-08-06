@@ -24,12 +24,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Dict, Generic, Optional, Tuple, Type, TypeVar, Union
-
-try:
-    from typing import Self
-except ImportError:
-    from typing_extensions import Self
+from typing import Any, Callable, Dict, Generic, Optional, Self, Tuple, Type, TypeVar, Union
 
 from django.db import models
 from django.db.models import Q

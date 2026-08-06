@@ -50,12 +50,6 @@ def _ResolveMasterURL(master_url):
     return DEFAULT_MASTER_URL
 
 
-def _GenerateChallenge():
-    """生成认证挑战字符串——与 auth.GenerateChallenge 统一格式（时间戳:UUID）"""
-    import time as _time
-    return f'{_time.time():.6f}:{uuid.uuid4().hex}'
-
-
 class ServiceClientError(Exception):
     def __init__(self, Message, StatusCode=None, ResponseBody=None):
         super().__init__(Message)

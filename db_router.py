@@ -35,14 +35,8 @@ class SAASDatabaseRouter:
         GVSDSDK_SAAS_READ_ONLY = True     # 默认 True（子服务器只读）
     """
 
-    # gvsdsdk 内所有模块前缀
-    _GVSDSDK_MODULES = frozenset({
-        'gvsdsdk.models',
-        'gvsdsdk.commission.models',
-        'gvsdsdk.payment.models',
-    })
-
-    # gvsdsdk 内所有 app_label
+    # gvsdsdk 内所有模块前缀（startswith 判定覆盖全部子模块，
+    # 无需维护显式模块名清单，避免新增模块时遗漏）
     _GVSDSDK_APP_LABELS = frozenset({
         'gvsdsdk',
     })
@@ -57,9 +51,9 @@ class SAASDatabaseRouter:
 
     def _is_gvsdsdk_model(self, model):
         """判断模型是否属于 gvsdsdk"""
-        # 按模块路径判断
+        # 按模块路径判断（gvsdsdk.* 前缀全覆盖）
         module = getattr(model, '__module__', '')
-        if module in self._GVSDSDK_MODULES or module.startswith('gvsdsdk.'):
+        if module.startswith('gvsdsdk.'):
             return True
         # 按 app_label 判断
         app_label = getattr(model._meta, 'app_label', '')

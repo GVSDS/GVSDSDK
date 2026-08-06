@@ -14,9 +14,8 @@
             'MyModel2': MyModel2,
         }
 
-    # 子服务器 views.py
-    from gvsdsdk.form_service import FormServiceAPIView
-    from .form_service import FormService
+    # 子服务器 views.py 中直接实例化 FormService 使用
+    # （FormServiceBase 提供 ORM 能力，视图层由子服务器自行封装）
 """
 
 import uuid
@@ -87,6 +86,17 @@ class FormServiceBase:
         if val is None or val == '':
             if getattr(field, 'null', False):
                 return None
+            # 非空字段：数值类型返回默认值或0，布尔类型返回 False，其他类型返回空字符串
+            field_type = field.__class__.__name__
+            if field_type in ('SmallIntegerField', 'IntegerField', 'BigIntegerField',
+                              'PositiveIntegerField', 'PositiveSmallIntegerField',
+                              'FloatField', 'DecimalField'):
+                default = getattr(field, 'default', None)
+                if default is not None:
+                    return default
+                return 0
+            if field_type == 'BooleanField':
+                return False
             return val
         field_type = field.__class__.__name__
         if field_type == 'UUIDField' and isinstance(val, str):
@@ -115,12 +125,25 @@ class FormServiceBase:
                 return val
         if field_type == 'DateTimeField' and isinstance(val, str):
             try:
-                return datetime.datetime.fromisoformat(val)
+                dt = datetime.datetime.fromisoformat(val)
+                # USE_TZ=False + MySQL 不接受 aware datetime：
+                # 统一转 naive UTC（UTC-0 存储，展示时由前端按用户时区转换）
+                if dt.tzinfo is not None:
+                    dt = dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+                return dt
             except (ValueError, TypeError):
                 return val
-        if hasattr(field, 'max_length') and field.max_length is not None and isinstance(val, str) and len(val) > field.max_length:
-            logger.warning('字段 %s 值超长（%d > %d），已截断', getattr(field, 'name', '?'), len(val), field.max_length)
-            val = val[:field.max_length]
+        if field_type in ('BooleanField', 'NullBooleanField') and isinstance(val, str):
+            low = val.strip().lower()
+            if low in ('true', '1', 't', 'yes'):
+                return True
+            if low in ('false', '0', 'f', 'no'):
+                return False
+            return val
+        max_length = getattr(field, 'max_length', None)
+        if max_length and isinstance(val, str) and len(val) > max_length:
+            logger.warning('字段 %s 值超长（%d > %d），已截断', getattr(field, 'name', '?'), len(val), max_length)
+            val = val[:max_length]
         return val
 
     @staticmethod
@@ -141,7 +164,6 @@ class FormServiceBase:
             'FloatField': 'number',
             'DecimalField': 'number',
             'BooleanField': 'boolean',
-            'NullBooleanField': 'boolean',
             'DateTimeField': 'datetime',
             'DateField': 'date',
             'TimeField': 'time',

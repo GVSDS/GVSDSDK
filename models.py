@@ -7,7 +7,7 @@
 供子服务器直接进行跨服务器 ORM 查询。
 
 权限体系四大分层：
-    1. 组织人事层：Tenant → Company → Department，员工通过 UserRole.DeptUUID 归属部门
+    1. 组织人事层：Tenant → Company → Department，员工通过 UserRoleDepartment/UserRoleWorkgroup 关联表归属部门/工作组
     2. 岗位模板层：PositionTemplate + PositionTemplatePermission，权限初始化快照
     3. 角色权限载体层：Role + RolePermission，运行时鉴权实体
     4. 鉴权规则层：操作权限校验（角色汇总）+ 数据权限校验（组织属性）
@@ -15,11 +15,13 @@
 使用方式（子服务器）：
     from gvsdsdk.models import Permission, Role, UserRole, RolePermission
 
-    # 查询所有启用的用户（需在业务子类中定义具体 User 模型）
-    users = User.objects.filter(UserAccountLicense=1)
+    # 查询所有启用的用户（User 为抽象基类，需经 _GetUserModel 获取具体模型）
+    from gvsdsdk.model_utils import _GetUserModel
+    UserModel = _GetUserModel()
+    users = UserModel.objects.filter(UserAccountLicense=1)
 
     # 或配置 DatabaseRouter 后直接使用
-    users = User.objects.filter(UserAccountLicense=1)
+    users = UserModel.objects.filter(UserAccountLicense=1)
 
 设计原则：
     1. 独立：不依赖 gvsds 内部模块，可在任意 Django 项目中独立使用
@@ -29,8 +31,7 @@
     5. 租户隔离：所有权限相关数据依附于独立租户空间，不同租户互相不可见
 
 注意：User 为抽象基类，仅包含 SAAS 主库标准字段。
-      业务子类应继承 User 并在单独文件中添加业务字段和方法。
-      参见 gvsdsdk/business_models.py。
+      业务子类应继承 User 并添加业务字段与方法（如 gvsds.apps.core.models.User）。
 """
 
 import uuid as _uuid
@@ -186,8 +187,7 @@ class User(QModel):
     """用户表——系统核心身份模型（抽象基类，映射 SAAS 主库 User 表标准字段）
 
     本类为抽象基类，仅包含 SAAS 主库 User 表的标准字段和方法。
-    业务子类应继承本类，在单独文件中添加业务字段和方法。
-    参见 gvsdsdk/business_models.py。
+    业务子类应继承本类并添加业务字段与方法（如 gvsds.apps.core.models.User）。
     """
 
     UserUUID = UUIDField(primary_key=True, db_column='UserUUID', verbose_name='用户UUID', default=_uuid.uuid4)
@@ -202,6 +202,8 @@ class User(QModel):
     UserTele = models.CharField(max_length=16, null=True, blank=True, db_column='UserTele', verbose_name='电话')
     UserCreateTime = models.DateTimeField(default=_UtcNow, db_column='UserCreateTime', verbose_name='创建时间')
     UserLastLoginDate = models.DateTimeField(default=_UtcNow, db_column='UserLastLoginDate', verbose_name='最后登录')
+    IsStaff = models.BooleanField(default=False, db_column='IsStaff', verbose_name='是否员工')
+    IsSuperuser = models.BooleanField(default=False, db_column='IsSuperuser', verbose_name='是否超级用户')
 
     # Django auth 框架必需（由具体子类覆盖）
     USERNAME_FIELD = 'UserName'
@@ -537,10 +539,12 @@ class UserRole(QModel):
     通过 CompanyUUID 标识该用户-角色关联所属的公司，
     用于菜单按公司差异化显示、数据权限按公司过滤等场景。
     同一用户在不同公司下可绑定不同角色。
-    DeptUUID、WorkgroupUUID 为可选字段，用于将关联进一步限定到部门或工作组。
     RoleType 标识该用户在部门/工作组中的角色类型：0=普通成员/部门员工，1=组长/部门负责人。
     RoleName 为可选的角色名覆盖：非空时前端展示用此名，为空时回退到 Role.RoleName。
     这避免了为每个用户单独建角色，又能让同角色在不同用户视角下显示差异化名称。
+
+    注意：DeptUUID、WorkgroupUUID 为遗留字段（已废弃）——部门/工作组归属已迁移到
+    UserRoleDepartment/UserRoleWorkgroup 关联表，字段仅保留兼容存量数据，禁止再次写入。
 
     注意：UserUUID/RoleUUID/CompanyUUID/DeptUUID/WorkgroupUUID 在 gvsds 中是 ForeignKey，
     但此处改为 UUIDField 以保持独立性（不支持 select_related 和关联属性访问）。
@@ -719,14 +723,24 @@ class PositionTemplate(QModel):
         ).values_list('PermUUID', flat=True)
         return Permission.objects.filter(PermUUID__in=perm_uuids, PermStatus=1)
 
-    def CopyToRole(self, RoleName, TenantUUID):
-        """从模板复制权限到新角色（一次性复制，后续模板变更不影响已有角色）"""
+    def CopyToRole(self, RoleName, TenantUUID, CompanyUUID=None):
+        """从模板复制权限到新角色（一次性复制，后续模板变更不影响已有角色）
+
+        Args:
+            RoleName: 新角色名称
+            TenantUUID: 新角色所属租户
+            CompanyUUID: 复制出的 RolePermission 所属公司。
+                缺省用系统公司 UUID（与主项目 RolePermission 创建一致），
+                RolePermission.CompanyUUID 为非空字段，漏传会导致插入失败。
+        """
         with transaction.atomic():
             role = Role.objects.create(
                 RoleUUID=_uuid.uuid4().bytes,
                 TenantUUID=TenantUUID,
                 RoleName=RoleName,
             )
+            if CompanyUUID is None:
+                CompanyUUID = _uuid.UUID('00000000-0000-0000-0000-000000000001')
             template_perms = PositionTemplatePermission.objects.filter(
                 PositionTemplateUUID=self.PositionTemplateUUID
             )
@@ -734,6 +748,7 @@ class PositionTemplate(QModel):
                 RolePermission(
                     RolePermUUID=_uuid.uuid4().bytes,
                     RoleUUID=role.RoleUUID,
+                    CompanyUUID=CompanyUUID,
                     PermUUID=tp.PermUUID,
                 )
                 for tp in template_perms
@@ -793,4 +808,4 @@ class Position(QModel):
     def __str__(self):
         return self.PositionName
 
-# （UserDept 表已废弃——员工部门关联改走 UserRole.DeptUUID，不再用独立表）
+# （UserDept 表已废弃——员工部门归属已迁移到 UserRoleDepartment 关联表，不再用独立表）

@@ -13,11 +13,10 @@ GVSDS 分布式服务间通信 SDK，作为子服务器（如 ATestCServer）和
 包结构：
     gvsdsdk/
     ├── auth/               # 用户认证与权限模块
-    │   ├── cookie.py       # 默认头像等工具
     │   ├── crypto.py       # 密码哈希 + AES 加密
     │   ├── middleware.py    # CurrentRoleMiddleware
     │   ├── permissions.py   # RBAC/ABAC 权限
-    │   └── managers.py     # UserManager + RoleManager
+    │   └── managers.py     # RoleManager（UserManager 在 models.py）
     ├── msync/              # MSYNC 服务间通信
     ├── commission/         # 分佣引擎
     │   ├── models.py       # 分佣数据模型
