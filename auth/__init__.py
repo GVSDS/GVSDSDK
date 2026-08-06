@@ -6,7 +6,7 @@ __all__ = [
     'IsAdminUser', 'IsCompanyMember', 'CompanyScopedMixin', 'TenantScopedMixin', 'UserScopedMixin', 'PermissionVerifier',
     'IsAdminScopeDisabled', 'IsTenantScopeDisabled',
     'IsAdmin', 'IsSuperAdmin', 'IsTenantAdmin',
-    'RoleManager',
+    'RoleManager', 'ShopManager', 'PositionManager', 'AuthManager', 'AdminUserManager', 'UserService',
 ]
 
 
@@ -30,8 +30,14 @@ def __getattr__(name):
         val = getattr(_m, name)
         globals()[name] = val
         return val
-    if name == 'RoleManager':
-        from gvsdsdk.auth.managers import RoleManager
-        globals()['RoleManager'] = RoleManager
-        return RoleManager
+    if name in ('RoleManager', 'ShopManager', 'PositionManager', 'AuthManager', 'AdminUserManager'):
+        from gvsdsdk.auth import managers as _m
+        val = getattr(_m, name)
+        globals()[name] = val
+        return val
+    if name == 'UserService':
+        from gvsdsdk.auth import user_service as _m
+        val = getattr(_m, name)
+        globals()[name] = val
+        return val
     raise AttributeError(f"module 'gvsdsdk.auth' has no attribute {name!r}")

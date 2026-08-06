@@ -150,11 +150,6 @@ def _load_order():
     return _mod
 
 
-def _load_minecraft():
-    from gvsdsdk import minecraft as _mod
-    return _mod
-
-
 def _load_models():
     from gvsdsdk import models as _mod
     return _mod
@@ -219,6 +214,9 @@ _LAZY_SYMBOLS = {
     'RoleManager': ('auth', 'RoleManager'),
     'ShopManager': ('auth', 'ShopManager'),
     'PositionManager': ('auth', 'PositionManager'),
+    'AuthManager': ('auth', 'AuthManager'),
+    'AdminUserManager': ('auth', 'AdminUserManager'),
+    'UserService': ('auth', 'UserService'),
 
     # ── 分佣引擎 ──────────────────────────────────────────
     'CommissionEngine': ('commission', 'CommissionEngine'),
@@ -264,10 +262,6 @@ _LAZY_SYMBOLS = {
     'Order': ('order', 'Order'),
     'OrderItem': ('order', 'OrderItem'),
 
-    # ── Minecraft 插件扩展 ────────────────────────────────
-    'EasyAuth': ('minecraft', 'EasyAuth'),
-    'EasyAuthManager': ('minecraft', 'EasyAuthManager'),
-
     # ── 数据模型 ──────────────────────────────────────────
     'User': ('models', 'User'),
     'Role': ('models', 'Role'),
@@ -310,7 +304,6 @@ _LOADERS = {
     'commission': _load_commission,
     'payment': _load_payment,
     'order': _load_order,
-    'minecraft': _load_minecraft,
     'models': _load_models,
     'fluent': _load_fluent,
     'model_base': _load_model_base,
