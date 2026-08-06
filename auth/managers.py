@@ -1,7 +1,7 @@
 import uuid
 from django.utils import timezone as _timezone
 
-from gvsdsdk.models import Role, UserRole, RolePermission, Permission, Position, PositionTemplate, PositionTemplatePermission, Shop, RoleShop, User2FA, UserAvatar, Password
+from gvsdsdk.models import Role, UserRole, RolePermission, Permission, Position, PositionTemplate, PositionTemplatePermission, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant
 from gvsdsdk.auth.crypto import HashPassword, VerifyPassword
 from gvsdsdk.model_utils import _GetUserModel, UUIDObj
 
@@ -338,6 +338,107 @@ class RoleManager:
             except (ValueError, AttributeError):
                 pass
         return user_uuids, role_uuids
+
+    @staticmethod
+    def GetPermissionByCode(PermCode, TenantUUID=None):
+        """按权限码查询启用权限（存在多个取首个；不存在返回 None）"""
+        if not PermCode:
+            return None
+        qs = Permission.objects.filter(PermCode=PermCode, PermStatus=1)
+        if TenantUUID is not None:
+            qs = qs.filter(TenantUUID=TenantUUID)
+        return qs.first()
+
+    @staticmethod
+    def HasUserPermission(UserUUID, PermCode, CompanyUUID=None):
+        """检查用户是否拥有指定权限码（UserRole→RolePermission→Permission 链路）
+
+        Args:
+            UserUUID: 用户 UUID
+            PermCode: 权限码（如 'Order:update'）
+            CompanyUUID: 可选，限定公司范围（默认按用户角色关联的公司集合过滤，
+                与 core.User.HasPermission 原逻辑一致）
+
+        Returns:
+            bool
+        """
+        if not PermCode or not UserUUID:
+            return False
+        try:
+            user_bytes = UUIDObj(UserUUID).bytes
+        except Exception:
+            user_bytes = UserUUID
+        perm_uuids = set(
+            Permission.objects.filter(PermCode=PermCode, PermStatus=1)
+            .values_list('PermUUID', flat=True)
+        )
+        if not perm_uuids:
+            return False
+        user_roles = UserRole.objects.filter(UserUUID=user_bytes)
+        user_role_uuids = user_roles.values_list('RoleUUID', flat=True)
+        if not user_role_uuids:
+            return False
+        rp_qs = RolePermission.objects.filter(
+            RoleUUID__in=user_role_uuids,
+            PermUUID__in=perm_uuids,
+        )
+        if CompanyUUID is not None:
+            rp_qs = rp_qs.filter(CompanyUUID=CompanyUUID)
+        else:
+            # 默认按用户角色关联的公司集合过滤（与 core.User.HasPermission 一致）
+            company_uuids = list(set(user_roles.values_list('CompanyUUID', flat=True)))
+            if company_uuids:
+                rp_qs = rp_qs.filter(CompanyUUID__in=company_uuids)
+        return rp_qs.exists()
+
+    @staticmethod
+    def CheckTablePermission(RoleUUID, PermCode, CompanyUUID=None, TableName=None):
+        """检查角色对某表某动作权限码的 RBAC 判定
+
+        组合判定：权限码是否定义 + 角色是否拥有 + 角色是否参与该表授权。
+
+        Args:
+            RoleUUID: 角色 UUID（可为 None，视为未参与授权）
+            PermCode: 完整权限码（如 'Order:update'）
+            CompanyUUID: 可选，公司 UUID
+            TableName: 表名（用于"参与授权"回退判定，如 'Order'）
+
+        Returns:
+            (Granted, Decided) 元组：
+            - (True, True): 已授权，放行
+            - (False, True): 明确拒绝（角色参与该表授权但缺此动作权限）
+            - (None, False): 权限码未定义或角色未参与该表授权，回退调用方原有逻辑
+        """
+        # 1. 权限码是否在系统中定义
+        perm_qs = Permission.objects.filter(PermCode=PermCode, PermStatus=1)
+        if not perm_qs.exists():
+            return None, False
+        perm_uuids = set(perm_qs.values_list('PermUUID', flat=True))
+        if not RoleUUID:
+            return None, False
+        # 2. 角色是否拥有该权限
+        rp_qs = RolePermission.objects.filter(RoleUUID=RoleUUID, PermUUID__in=perm_uuids)
+        if CompanyUUID is not None:
+            rp_qs = rp_qs.filter(CompanyUUID=CompanyUUID)
+        if rp_qs.exists():
+            return True, True
+        # 3. 角色是否参与该表授权（拥有该表的其他权限码）
+        if not TableName:
+            return False, True
+        role_perm_uuids = set(
+            RolePermission.objects.filter(RoleUUID=RoleUUID)
+            .values_list('PermUUID', flat=True)
+        )
+        if not role_perm_uuids:
+            return None, False
+        has_table_perm = Permission.objects.filter(
+            PermUUID__in=role_perm_uuids,
+            PermCode__startswith=f'{TableName}:',
+            PermStatus=1,
+        ).exists()
+        if not has_table_perm:
+            return None, False
+        return False, True
 
 
 class PositionManager:
@@ -761,6 +862,137 @@ class AuthManager:
         avatar.save(update_fields=['UserAvatar', 'AvatarFileType', 'AvatarUploadTime'])
         return avatar
 
+    @staticmethod
+    def VerifyUserPassword(UserUUID, Password):
+        """校验用户密码（独立 Password 审计表）
+
+        Returns:
+            (用户记录存在?, 密码是否匹配)
+        """
+        return AdminUserManager.VerifyPassword(UserUUID, Password)
+
+    @staticmethod
+    def Setup2FA(UserUUID, Password):
+        """发起 2FA 设置——校验密码后生成密钥写入待验证表
+
+        Args:
+            UserUUID: 用户 UUID
+            Password: 明文密码（校验 Password 审计表）
+
+        Returns:
+            (成功?, 消息, secret 或 None)
+        """
+        found, valid = AuthManager.VerifyUserPassword(UserUUID, Password)
+        if not found:
+            return False, '密码验证失败', None
+        if not valid:
+            return False, '密码错误', None
+        if User2FA.objects.filter(UserUUID=UUIDObj(UserUUID).bytes).exists():
+            return False, '已启用2FA', None
+        import pyotp
+        secret = pyotp.random_base32()
+        UserPending2FA.objects.update_or_create(
+            UserUUID=UUIDObj(UserUUID).bytes,
+            defaults={'SecretKey': secret},
+        )
+        return True, '请扫描二维码', secret
+
+    @staticmethod
+    def GetPending2FA(UserUUID):
+        """获取用户待验证 2FA 记录（不存在返回 None）"""
+        return UserPending2FA.objects.filter(
+            UserUUID=UUIDObj(UserUUID).bytes,
+        ).first()
+
+    @staticmethod
+    def Disable2FA(UserUUID, Password, Token):
+        """禁用 2FA——校验密码 + TOTP 验证码后删除启用记录
+
+        Returns:
+            (成功?, 消息)
+        """
+        found, valid = AuthManager.VerifyUserPassword(UserUUID, Password)
+        if not found:
+            return False, '密码验证失败'
+        if not valid:
+            return False, '密码错误'
+        two_fa = User2FA.objects.filter(UserUUID=UUIDObj(UserUUID).bytes).first()
+        if two_fa is None:
+            return False, '未启用2FA'
+        if not AuthManager.Verify2FA(UserUUID, Token):
+            return False, '验证码错误'
+        two_fa.delete()
+        return True, '2FA已禁用'
+
+    @staticmethod
+    def SendAccountActivationCode(UserUUID, Email):
+        """发送邮箱激活码——删除旧码并生成新 6 位码
+
+        Returns:
+            (成功?, 消息, code 或 None)
+        """
+        if not Email:
+            return False, '邮箱不能为空', None
+        user = AuthManager.GetUserByUUID(UserUUID)
+        if user is None:
+            return False, '用户不存在', None
+        if user.UserEmail and user.UserEmail == Email:
+            return True, '邮箱已验证', None
+        code = ''.join([str(uuid.uuid4().int % 10) for _ in range(6)])
+        AccountActivation.objects.filter(UserUUID=UUIDObj(UserUUID).bytes).delete()
+        AccountActivation.objects.create(
+            AccountActivationCode=code.encode('utf-8'),
+            UserUUID=UUIDObj(UserUUID).bytes,
+        )
+        return True, '验证码已发送', code
+
+    @staticmethod
+    def VerifyAccountActivationCode(UserUUID, Code, Email, ExpireMinutes=30):
+        """校验邮箱激活码——校验码值 + 过期时间，成功后更新邮箱并置已认证
+
+        Returns:
+            (成功?, 消息)
+        """
+        if not Code or not Email:
+            return False, '验证码或邮箱不能为空'
+        activation = AccountActivation.objects.filter(
+            UserUUID=UUIDObj(UserUUID).bytes,
+        ).first()
+        if activation is None:
+            return False, '请先发送验证码'
+        stored_code = activation.AccountActivationCode
+        if isinstance(stored_code, memoryview):
+            stored_code = bytes(stored_code)
+        if stored_code.decode('utf-8') != Code:
+            return False, '验证码错误'
+        from datetime import timedelta
+        created = activation.CreateTime
+        if created and _timezone.now() - created > timedelta(minutes=ExpireMinutes):
+            activation.delete()
+            return False, '验证码已过期'
+        activation.delete()
+        user = AuthManager.GetUserByUUID(UserUUID)
+        if user is None:
+            return False, '用户不存在'
+        user.UserEmail = Email
+        user.UserEmailVerify = 1
+        user.save(update_fields=['UserEmail', 'UserEmailVerify'])
+        return True, '邮箱验证成功'
+
+    @staticmethod
+    def ChangeUserEmail(UserUUID, NewEmail):
+        """修改用户邮箱（仅更新 UserEmail 字段，不重置认证状态）
+
+        Returns:
+            (成功?, 消息)
+        """
+        user = AuthManager.GetUserByUUID(UserUUID)
+        if user is None:
+            return False, '用户不存在'
+        user.UserEmail = NewEmail
+        user.save(update_fields=['UserEmail'])
+        return True, '邮箱修改成功'
+
 
 class AdminUserManager:
     """管理端用户管理器——用户搜索、密码重置、账户状态与邮箱管理"""
@@ -875,4 +1107,95 @@ class AdminUserManager:
             'LastUsedAt': two_fa.LastUsedAt.isoformat() if two_fa.LastUsedAt else None,
             'CreateTime': two_fa.CreateTime.isoformat() if two_fa.CreateTime else None,
         }
+
+
+class TenantManager:
+    """租户管理器——租户入驻申请与审核"""
+
+    # 审核状态常量
+    REVIEW_PENDING = 0
+    REVIEW_APPROVED = 1
+    REVIEW_REJECTED = 2
+
+    @staticmethod
+    def ApplyTenant(TenantName, TenantExpireTime, ReviewRemark=''):
+        """提交租户入驻申请（创建待审核租户）
+
+        Args:
+            TenantName: 租户名称
+            TenantExpireTime: 到期时间（datetime）
+            ReviewRemark: 审核备注
+
+        Returns:
+            (Tenant 实例, 错误消息 or None)；租户名已存在或入参缺失返回 (None, 错误)
+        """
+        if not TenantName:
+            return None, '租户名称不能为空'
+        if TenantExpireTime is None:
+            return None, '到期时间不能为空'
+        if Tenant.objects.filter(TenantName=TenantName).exists():
+            return None, f'租户名称「{TenantName}」已存在'
+        tenant = Tenant.objects.create(
+            TenantUUID=uuid.uuid4().bytes,
+            TenantName=TenantName,
+            TenantStatus=1,
+            TenantExpireTime=TenantExpireTime,
+            ReviewStatus=TenantManager.REVIEW_PENDING,
+            ReviewRemark=ReviewRemark,
+        )
+        return tenant, None
+
+    @staticmethod
+    def ListPendingTenants():
+        """获取待审核租户列表（按创建时间倒序）"""
+        return Tenant.objects.filter(
+            ReviewStatus=TenantManager.REVIEW_PENDING,
+        ).order_by('-CreateTime')
+
+    @staticmethod
+    def GetTenantByUUID(TenantUUID):
+        """按 UUID 查询租户（不存在返回 None）"""
+        try:
+            return Tenant.objects.get(TenantUUID=UUIDObj(TenantUUID).bytes)
+        except (Tenant.DoesNotExist, ValueError, AttributeError):
+            return None
+
+    @staticmethod
+    def ApproveTenant(TenantUUID, ReviewerUUID):
+        """批准租户入驻（状态 0→1，记录审核人与时间）
+
+        Returns:
+            (Tenant 实例, 错误消息 or None)；租户不存在或状态非待审核返回 (None, 错误)
+        """
+        tenant = TenantManager.GetTenantByUUID(TenantUUID)
+        if tenant is None:
+            return None, '租户不存在'
+        if tenant.ReviewStatus != TenantManager.REVIEW_PENDING:
+            return None, f'租户当前状态非待审核（状态码：{tenant.ReviewStatus}）'
+        tenant.ReviewStatus = TenantManager.REVIEW_APPROVED
+        tenant.ReviewerUUID = ReviewerUUID
+        tenant.ReviewTime = _timezone.now()
+        tenant.save(update_fields=['ReviewStatus', 'ReviewerUUID', 'ReviewTime'])
+        return tenant, None
+
+    @staticmethod
+    def RejectTenant(TenantUUID, ReviewerUUID, RejectReason):
+        """拒绝租户入驻（状态 0→2，记录理由/审核人/时间）
+
+        Returns:
+            (Tenant 实例, 错误消息 or None)
+        """
+        if not RejectReason:
+            return None, '拒绝理由不能为空'
+        tenant = TenantManager.GetTenantByUUID(TenantUUID)
+        if tenant is None:
+            return None, '租户不存在'
+        if tenant.ReviewStatus != TenantManager.REVIEW_PENDING:
+            return None, f'租户当前状态非待审核（状态码：{tenant.ReviewStatus}）'
+        tenant.ReviewStatus = TenantManager.REVIEW_REJECTED
+        tenant.ReviewRemark = RejectReason
+        tenant.ReviewerUUID = ReviewerUUID
+        tenant.ReviewTime = _timezone.now()
+        tenant.save(update_fields=['ReviewStatus', 'ReviewRemark', 'ReviewerUUID', 'ReviewTime'])
+        return tenant, None
 

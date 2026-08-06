@@ -221,6 +221,7 @@ _LAZY_SYMBOLS = {
     'PositionManager': ('auth', 'PositionManager'),
     'AuthManager': ('auth', 'AuthManager'),
     'AdminUserManager': ('auth', 'AdminUserManager'),
+    'TenantManager': ('auth', 'TenantManager'),
     'UserService': ('auth', 'UserService'),
 
     # ── 分佣引擎 ──────────────────────────────────────────

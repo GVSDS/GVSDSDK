@@ -446,6 +446,32 @@ class AccountActivation(QModel):
         verbose_name_plural = '账户激活'
 
 
+# === 租户表 ===
+
+class Tenant(QModel):
+    """租户表——多租户架构核心（映射 SAAS 主库 Tenant 表）"""
+
+    TenantUUID = UUIDField(primary_key=True, db_column='TenantUUID', verbose_name='租户UUID')
+    TenantName = models.CharField(max_length=256, db_column='TenantName', verbose_name='租户名称')
+    TenantStatus = models.SmallIntegerField(default=1, db_column='TenantStatus', verbose_name='租户状态')
+    TenantExpireTime = models.DateTimeField(db_column='TenantExpireTime', verbose_name='到期时间')
+    ReviewStatus = models.SmallIntegerField(default=0, db_column='ReviewStatus', verbose_name='审核状态')
+    ReviewRemark = models.CharField(max_length=512, default='', db_column='ReviewRemark', verbose_name='审核备注')
+    ReviewerUUID = UUIDField(null=True, blank=True, db_column='ReviewerUUID', verbose_name='审核人UUID')
+    ReviewTime = models.DateTimeField(null=True, blank=True, db_column='ReviewTime', verbose_name='审核时间')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'Tenant'
+        verbose_name = '租户'
+        verbose_name_plural = '租户'
+
+    def __str__(self):
+        return self.TenantName
+
+
 # === 角色表 ===
 
 class Role(QModel):
