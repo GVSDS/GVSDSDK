@@ -537,6 +537,26 @@ class UserRoleDepartment(QModel):
         verbose_name_plural = '用户-角色部门关联'
 
 
+# === 用户-角色工作组关联表 ===
+
+class UserRoleWorkgroup(QModel):
+    """用户-角色对 与 工作组 的多对多关联表（映射 SAAS 主库 UserRoleWorkgroup 表）"""
+
+    UserRoleWorkgroupUUID = UUIDField(primary_key=True, db_column='UserRoleWorkgroupUUID', verbose_name='关联UUID')
+    UserRoleUUID = UUIDField(db_column='UserRoleUUID', verbose_name='用户-角色关联UUID')
+    WorkgroupUUID = UUIDField(db_column='WorkgroupUUID', verbose_name='工作组UUID')
+    CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
+    RoleType = models.SmallIntegerField(default=0, db_column='RoleType', verbose_name='角色类型')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'UserRoleWorkgroup'
+        verbose_name = '用户-角色工作组关联'
+        verbose_name_plural = '用户-角色工作组关联'
+
+
 # === 消息表 ===
 
 class Message(QModel):
@@ -1050,3 +1070,32 @@ class WorkOrder(QModel):
 
     def __str__(self):
         return self.Title
+
+
+# === 操作审计日志表 ===
+
+class AuditLog(QModel):
+    """操作审计日志表——记录敏感表写操作快照（映射 SAAS 主库 AuditLog 表）"""
+
+    AuditLogUUID = UUIDField(primary_key=True, db_column='AuditLogUUID', verbose_name='日志UUID')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
+    CompanyUUID = UUIDField(null=True, blank=True, db_column='CompanyUUID', verbose_name='公司UUID')
+    UserUUID = UUIDField(null=True, blank=True, db_column='UserUUID', verbose_name='操作人UUID')
+    TableName = models.CharField(max_length=64, db_index=True, db_column='TableName', verbose_name='表名')
+    Action = models.CharField(max_length=16, db_column='Action', verbose_name='操作类型')
+    TargetUUID = UUIDField(null=True, blank=True, db_column='TargetUUID', verbose_name='目标记录UUID')
+    IPAddress = models.CharField(max_length=64, default='', db_column='IPAddress', verbose_name='IP地址')
+    OldData = models.JSONField(null=True, blank=True, db_column='OldData', verbose_name='变更前数据')
+    NewData = models.JSONField(null=True, blank=True, db_column='NewData', verbose_name='变更后数据')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_index=True, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'AuditLog'
+        ordering = ['-CreateTime']
+        verbose_name = '操作审计日志'
+        verbose_name_plural = '操作审计日志'
+
+    def __str__(self):
+        return f'{self.TableName}/{self.Action}'

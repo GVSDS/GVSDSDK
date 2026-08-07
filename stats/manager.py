@@ -7,7 +7,7 @@
 
 from django.db import transaction, connection
 from django.db.models import F, Sum, Count
-from gvsdsdk.stats.models import StatMetric, StatRecord
+from gvsdsdk.stats.models import StatMetric, StatRecord, StatDimension, StatConfig
 
 
 class StatsManager:
@@ -313,3 +313,27 @@ class StatsManager:
         )
         count, _ = qs.delete()
         return count
+
+    @staticmethod
+    def ListMetrics(tenant_uuid, status=None):
+        """列出租户下的统计指标（可按状态过滤，保持数据库顺序）"""
+        qs = StatMetric.objects.filter(TenantUUID=tenant_uuid)
+        if status is not None:
+            qs = qs.filter(MetricStatus=status)
+        return qs
+
+    @staticmethod
+    def ListDimensions(tenant_uuid, status=None):
+        """列出租户下的统计维度（可按状态过滤，保持数据库顺序）"""
+        qs = StatDimension.objects.filter(TenantUUID=tenant_uuid)
+        if status is not None:
+            qs = qs.filter(DimensionStatus=status)
+        return qs
+
+    @staticmethod
+    def ListConfigs(tenant_uuid, status=None):
+        """列出租户下的统计配置（可按状态过滤，保持数据库顺序）"""
+        qs = StatConfig.objects.filter(TenantUUID=tenant_uuid)
+        if status is not None:
+            qs = qs.filter(ConfigStatus=status)
+        return qs

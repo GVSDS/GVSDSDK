@@ -2,9 +2,12 @@ import uuid
 from django.db.models import Q
 from django.utils import timezone as _timezone
 
-from gvsdsdk.models import Role, UserRole, RolePermission, Permission, Position, PositionTemplate, PositionTemplatePermission, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, UserRoleDepartment, Message, Menu, WorkOrder
+from gvsdsdk.models import Role, UserRole, UserRoleDepartment, UserRoleWorkgroup, RolePermission, Permission, Position, PositionTemplate, PositionTemplatePermission, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, Message, Menu, WorkOrder, AuditLog
 from gvsdsdk.auth.crypto import HashPassword, VerifyPassword
 from gvsdsdk.model_utils import _GetUserModel, UUIDObj
+
+# 系统公司 UUID（00000000-0000-0000-0000-000000000001），全局唯一
+_SYSTEM_COMPANY_UUID = uuid.UUID('00000000-0000-0000-0000-000000000001').bytes
 
 # NOTE: 类型注解暂缓——RoleManager/PositionManager 静态方法较多，全量补充注解工作量较大且易引入回归，后续单独迭代处理。
 
@@ -175,6 +178,68 @@ class RoleManager:
         if CompanyUUID is not None:
             qs = qs.filter(CompanyUUID=CompanyUUID)
         return list(qs)
+
+    @staticmethod
+    def GetUserRoleRelation(UserUUID, RoleUUID, CompanyUUID=None):
+        """按 (用户, 角色[, 公司]) 查询 UserRole 关联（不存在返回 None）"""
+        qs = UserRole.objects.filter(
+            UserUUID=UUIDObj(UserUUID).bytes,
+            RoleUUID=UUIDObj(RoleUUID).bytes,
+        )
+        if CompanyUUID is not None:
+            try:
+                qs = qs.filter(CompanyUUID=UUIDObj(CompanyUUID).bytes)
+            except Exception:
+                qs = qs.filter(CompanyUUID=CompanyUUID)
+        return qs.first()
+
+    @staticmethod
+    def GetUserRoleDepartment(UserRoleUUID):
+        """按 UserRoleUUID 查询部门归属（不存在返回 None）"""
+        return UserRoleDepartment.objects.filter(
+            UserRoleUUID=UUIDObj(UserRoleUUID).bytes,
+        ).first()
+
+    @staticmethod
+    def GetUserRoleWorkgroup(UserRoleUUID):
+        """按 UserRoleUUID 查询工作组归属（不存在返回 None）"""
+        return UserRoleWorkgroup.objects.filter(
+            UserRoleUUID=UUIDObj(UserRoleUUID).bytes,
+        ).first()
+
+    @staticmethod
+    def GetScopeMembers(ScopeType, UUID):
+        """获取作用域成员的用户 UUID 列表（去重）
+
+        Args:
+            ScopeType: 'dept_manager' | 'workgroup_lead'
+            UUID: 部门或工作组 UUID（bytes/str/UUIDObj 均可）
+
+        Returns:
+            list[bytes]：成员用户 UUID；无成员返回 []；未知类型或异常返回 None
+        """
+        try:
+            uuid_bytes = UUIDObj(UUID).bytes
+        except Exception:
+            return None
+        try:
+            if ScopeType == 'dept_manager':
+                ur_uuids = list(UserRoleDepartment.objects.filter(
+                    DeptUUID=uuid_bytes,
+                ).values_list('UserRoleUUID', flat=True))
+            elif ScopeType == 'workgroup_lead':
+                ur_uuids = list(UserRoleWorkgroup.objects.filter(
+                    WorkgroupUUID=uuid_bytes,
+                ).values_list('UserRoleUUID', flat=True))
+            else:
+                return None
+            if not ur_uuids:
+                return []
+            # UserRoleUUID → UserUUID（关联表存 UserRoleUUID，用户 UUID 从 UserRole 表取）
+            qs = UserRole.objects.filter(UserRoleUUID__in=ur_uuids)
+            return list(set(qs.values_list('UserUUID', flat=True)))
+        except Exception:
+            return None
 
     @staticmethod
     def HasRolePermission(RoleUUID, PermUUID, CompanyUUID=None):
@@ -455,6 +520,103 @@ class RoleManager:
         if not has_table_perm:
             return None, False
         return False, True
+
+    @staticmethod
+    def EnsureDefaultRoleForUser(UserUUID, CompanyUUID, AdminUserUUID=None):
+        """为新用户关联全局默认角色（"默认角色"在系统租户下唯一）
+
+        租户解析顺序：系统公司所属租户 → 操作管理员角色租户 → 系统首个租户。
+
+        Args:
+            UserUUID: 新用户 UUID（bytes/str/UUIDObj 均可）
+            CompanyUUID: 公司 UUID（通常为系统公司）
+            AdminUserUUID: 可选，操作管理员 UUID（租户回退用）
+
+        Returns:
+            (UserRole 实例 or None, 错误消息 or None)
+        """
+        company_bytes = UUIDObj(CompanyUUID).bytes
+        # 角色租户优先取自系统公司所属租户
+        tenant_uuid = None
+        company = Company.objects.filter(CompanyUUID=company_bytes).first()
+        if company is not None:
+            tenant_uuid = company.TenantUUID
+        # 回退：当前操作管理员的首个角色租户
+        if not tenant_uuid and AdminUserUUID:
+            try:
+                admin_ur = UserRole.objects.filter(
+                    UserUUID=UUIDObj(AdminUserUUID).bytes,
+                ).first()
+                if admin_ur and admin_ur.RoleUUID:
+                    role = Role.objects.filter(RoleUUID=admin_ur.RoleUUID).first()
+                    tenant_uuid = role.TenantUUID if role else None
+            except Exception:
+                tenant_uuid = None
+        # 回退：系统首个租户
+        if not tenant_uuid:
+            tenant = Tenant.objects.first()
+            tenant_uuid = tenant.TenantUUID if tenant else None
+        if not tenant_uuid:
+            return None, '无法确定租户'
+
+        # 查找或创建全局唯一的"默认角色"
+        default_role = Role.objects.filter(
+            TenantUUID=tenant_uuid,
+            RoleName='默认角色',
+        ).first()
+        if not default_role:
+            default_role = Role.objects.create(
+                RoleUUID=uuid.uuid4().bytes,
+                TenantUUID=tenant_uuid,
+                RoleName='默认角色',
+                RoleStatus=1,
+                AssignScope=0,
+                RoleDesc='系统默认角色，所有新用户自动关联',
+                CreateTime=_timezone.now(),
+            )
+
+        # 避免重复关联
+        if RoleManager.HasRole(UserUUID, default_role.RoleUUID, CompanyUUID):
+            return None, None
+        ur = UserRole.objects.create(
+            UserRoleUUID=uuid.uuid4().bytes,
+            UserUUID=UUIDObj(UserUUID).bytes,
+            RoleUUID=default_role.RoleUUID,
+            CompanyUUID=company_bytes,
+        )
+        return ur, None
+
+    @staticmethod
+    def EnsureTenantAdminRole(TenantUUID):
+        """为租户（集团）创建/复用"集团超级管理员"角色并分配 admin:tenant 权限
+
+        Args:
+            TenantUUID: 租户 UUID（bytes/str/UUIDObj 均可）
+
+        Returns:
+            Role 实例（已创建或已存在）
+        """
+        tenant_bytes = UUIDObj(TenantUUID).bytes
+        role = Role.objects.filter(
+            TenantUUID=tenant_bytes,
+            RoleName='集团超级管理员',
+        ).first()
+        if role:
+            return role
+
+        role = RoleManager.CreateRole(
+            '集团超级管理员', tenant_bytes,
+            AssignScope=0,
+            RoleDesc='集团超级管理员，管理本租户下所有事务',
+        )
+
+        # 分配 admin:tenant 权限（租户内管理员：关闭公司隔离，保留租户隔离）
+        admin_perm = RoleManager.GetPermissionByCode('admin:tenant')
+        if admin_perm:
+            RoleManager.AssignPermission(
+                role.RoleUUID, admin_perm.PermUUID, _SYSTEM_COMPANY_UUID,
+            )
+        return role
 
 
 class PositionManager:
@@ -1021,6 +1183,56 @@ class AuthManager:
 
 class AdminUserManager:
     """管理端用户管理器——用户搜索、密码重置、账户状态与邮箱管理"""
+
+    @staticmethod
+    def DeleteUser(UserUUID):
+        """删除用户并级联清理关联数据（UserRole / 专属默认角色 / UserAvatar / User2FA / UserPending2FA）
+
+        与 gvsds FormService.delete_record 用户分支零行为差异：
+        仅当角色名为 "{用户名}的默认角色" 且无其他用户持有时才删除角色本身。
+
+        Args:
+            UserUUID: 用户 UUID（bytes/str/UUIDObj 均可）
+
+        Returns:
+            (成功?, 错误消息 or None)
+        """
+        User = _GetUserModel()
+        try:
+            user_bytes = UUIDObj(UserUUID).bytes
+        except Exception:
+            return False, '无效的 UserUUID'
+        user = User.objects.filter(UserUUID=user_bytes).first()
+        if user is None:
+            return False, '用户不存在'
+
+        from django.db import transaction
+        with transaction.atomic():
+            user_name = getattr(user, 'UserName', '') or ''
+            # 查找该用户的所有 UserRole 关联
+            user_roles = list(UserRole.objects.filter(UserUUID=user_bytes))
+            # 识别默认角色：名称匹配 "{用户名}的默认角色" 且仅此用户一人
+            default_role_ids = []
+            for ur in user_roles:
+                role = Role.objects.filter(RoleUUID=ur.RoleUUID).first()
+                if role and getattr(role, 'RoleName', '') == f'{user_name}的默认角色':
+                    other_count = UserRole.objects.filter(
+                        RoleUUID=role.RoleUUID,
+                    ).exclude(UserUUID=user_bytes).count()
+                    if other_count == 0:
+                        default_role_ids.append(role.RoleUUID)
+            # 删除所有 UserRole 关联
+            UserRole.objects.filter(UserUUID=user_bytes).delete()
+            # 删除默认角色（RolePermission 会被 cascade 删除）
+            if default_role_ids:
+                Role.objects.filter(RoleUUID__in=default_role_ids).delete()
+            # 清理 UserAvatar / User2FA / UserPending2FA（这些表用 UUIDField 而非 ForeignKey，不会自动级联）
+            UserAvatar.objects.filter(UserUUID=user_bytes).delete()
+            User2FA.objects.filter(UserUUID=user_bytes).delete()
+            UserPending2FA.objects.filter(UserUUID=user_bytes).delete()
+            # 删除用户本身
+            user.delete()
+        return True, None
 
     @staticmethod
     def SearchUsers(Keyword='', Offset=0, PageSize=20):
@@ -1770,4 +1982,49 @@ class WorkOrderManager:
         wo.UpdateTime = _timezone.now()
         wo.save()
         return WorkOrderManager._ToFlat(wo)
+
+
+class AuditManager:
+    """审计日志管理器——敏感表写操作快照记录（失败静默，不阻断业务）"""
+
+    @staticmethod
+    def Log(TenantUUID=None, CompanyUUID=None, UserUUID=None, TableName='',
+            Action='', TargetUUID=None, IPAddress='', OldData=None, NewData=None):
+        """写入一条审计日志
+
+        Args:
+            TenantUUID/CompanyUUID/UserUUID: 归属与操作人 UUID（bytes/str/UUIDObj 均可，无效自动置空）
+            TableName: 表名
+            Action: 操作类型（add/modify/delete/xxx_status）
+            TargetUUID: 目标记录 UUID
+            IPAddress: 操作 IP
+            OldData/NewData: 变更前后数据快照
+
+        Returns:
+            True
+        """
+        def _ToBytes(value):
+            if value is None:
+                return None
+            try:
+                return UUIDObj(value).bytes
+            except Exception:
+                return None
+
+        try:
+            AuditLog.objects.create(
+                AuditLogUUID=uuid.uuid4().bytes,
+                TenantUUID=_ToBytes(TenantUUID),
+                CompanyUUID=_ToBytes(CompanyUUID),
+                UserUUID=_ToBytes(UserUUID),
+                TableName=TableName or '',
+                Action=Action or '',
+                TargetUUID=_ToBytes(TargetUUID),
+                IPAddress=IPAddress or '',
+                OldData=OldData,
+                NewData=NewData,
+            )
+        except Exception:
+            pass
+        return True
 
