@@ -388,6 +388,28 @@ class FormServiceBase:
         deleted, _ = model.objects.filter(**{pk_field_name: pk_value}).delete()
         return bool(deleted)
 
+    # ---- 低层落库辅助：供子类通用 CRUD 落库点复用（裸 ORM 收敛到 SDK） ----
+
+    def _CreateObject(self, model, create_data):
+        """按已解析字段字典创建记录（通用新增落库点）"""
+        return model.objects.create(**create_data)
+
+    def _GetObject(self, model, lookup):
+        """按查询条件取单条记录（通用查询落库点，DoesNotExist 由调用方处理）"""
+        return model.objects.get(**lookup)
+
+    def _SaveObject(self, obj, update_fields=None):
+        """保存记录（通用更新落库点）"""
+        if update_fields:
+            obj.save(update_fields=update_fields)
+        else:
+            obj.save()
+        return obj
+
+    def _DeleteObject(self, obj):
+        """删除记录（通用删除落库点）"""
+        obj.delete()
+
     def CodeDisplay(self, data):
         table_name = data.get('Table', '')
         code_field = data.get('CodeField', 'PermCode')
