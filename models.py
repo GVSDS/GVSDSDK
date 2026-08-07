@@ -1191,3 +1191,228 @@ class FileAsset(QModel):
 
     def __str__(self):
         return self.FileName
+
+
+class CompanyInfo(QModel):
+    """企业信息表——工商注册与企业详情（映射 SAAS 主库 CompanyInfo 表）"""
+
+    CompanyInfoUUID = UUIDField(primary_key=True, db_column='CompanyInfoUUID', verbose_name='企业信息UUID')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
+    EnterpriseName = models.CharField(max_length=256, db_column='EnterpriseName', verbose_name='企业全称')
+    EnterpriseShortName = models.CharField(max_length=100, db_column='EnterpriseShortName', verbose_name='企业简称')
+    CreditCode = models.CharField(max_length=64, unique=True, db_column='CreditCode', verbose_name='统一社会信用代码')
+    EnterpriseType = models.CharField(max_length=32, default='', db_column='EnterpriseType', verbose_name='企业类型')
+    OwnershipType = models.CharField(max_length=32, default='', db_column='OwnershipType', verbose_name='所有制类型')
+    Industry = models.CharField(max_length=32, default='', db_column='Industry', verbose_name='行业')
+    Scale = models.CharField(max_length=32, default='', db_column='Scale', verbose_name='规模')
+    RegisteredCapital = models.CharField(max_length=64, default='', db_column='RegisteredCapital', verbose_name='注册资本')
+    EstablishDate = models.CharField(max_length=32, default='', db_column='EstablishDate', verbose_name='成立日期')
+    BusinessScope = models.TextField(default='', db_column='BusinessScope', verbose_name='经营范围')
+    BusinessStatus = models.CharField(max_length=32, default='', db_column='BusinessStatus', verbose_name='经营状态')
+    RegProvince = models.CharField(max_length=32, default='', db_column='RegProvince', verbose_name='注册省份')
+    RegCity = models.CharField(max_length=32, default='', db_column='RegCity', verbose_name='注册城市')
+    RegDistrict = models.CharField(max_length=32, default='', db_column='RegDistrict', verbose_name='注册区县')
+    RegAddress = models.CharField(max_length=512, default='', db_column='RegAddress', verbose_name='注册地址')
+    OfficeProvince = models.CharField(max_length=32, default='', db_column='OfficeProvince', verbose_name='办公省份')
+    OfficeCity = models.CharField(max_length=32, default='', db_column='OfficeCity', verbose_name='办公城市')
+    OfficeDistrict = models.CharField(max_length=32, default='', db_column='OfficeDistrict', verbose_name='办公区县')
+    OfficeAddress = models.CharField(max_length=512, default='', db_column='OfficeAddress', verbose_name='办公地址')
+    Phone = models.CharField(max_length=32, default='', db_column='Phone', verbose_name='电话')
+    Phone2 = models.CharField(max_length=32, default='', db_column='Phone2', verbose_name='电话2')
+    Fax = models.CharField(max_length=32, default='', db_column='Fax', verbose_name='传真')
+    Email = models.CharField(max_length=128, default='', db_column='Email', verbose_name='邮箱')
+    Hotline = models.CharField(max_length=32, default='', db_column='Hotline', verbose_name='热线')
+    ServicePhone = models.CharField(max_length=32, default='', db_column='ServicePhone', verbose_name='客服电话')
+    Website = models.CharField(max_length=256, default='', db_column='Website', verbose_name='网站')
+    Wechat = models.CharField(max_length=128, default='', db_column='Wechat', verbose_name='微信')
+    WechatMini = models.CharField(max_length=128, default='', db_column='WechatMini', verbose_name='微信小程序')
+    Weibo = models.CharField(max_length=128, default='', db_column='Weibo', verbose_name='微博')
+    LinkedIn = models.CharField(max_length=256, default='', db_column='LinkedIn', verbose_name='领英')
+    Bank = models.CharField(max_length=32, default='', db_column='Bank', verbose_name='开户银行')
+    BankAccount = models.CharField(max_length=64, default='', db_column='BankAccount', verbose_name='银行账号')
+    BankBranch = models.CharField(max_length=128, default='', db_column='BankBranch', verbose_name='开户支行')
+    BankProvince = models.CharField(max_length=32, default='', db_column='BankProvince', verbose_name='银行省份')
+    BankCity = models.CharField(max_length=32, default='', db_column='BankCity', verbose_name='银行城市')
+    AccountName = models.CharField(max_length=128, default='', db_column='AccountName', verbose_name='账户名')
+    BankCode = models.CharField(max_length=32, default='', db_column='BankCode', verbose_name='银行代码')
+    AccountType = models.CharField(max_length=32, default='', db_column='AccountType', verbose_name='账户类型')
+    AccountStatus = models.CharField(max_length=32, default='', db_column='AccountStatus', verbose_name='账户状态')
+    TaxBank = models.CharField(max_length=128, default='', db_column='TaxBank', verbose_name='税务银行')
+    TaxAccount = models.CharField(max_length=64, default='', db_column='TaxAccount', verbose_name='税务账号')
+    TaxBankCode = models.CharField(max_length=32, default='', db_column='TaxBankCode', verbose_name='税务银行代码')
+    SalaryBank = models.CharField(max_length=128, default='', db_column='SalaryBank', verbose_name='薪资银行')
+    SalaryAccount = models.CharField(max_length=64, default='', db_column='SalaryAccount', verbose_name='薪资账号')
+    SocialSecurityBank = models.CharField(max_length=128, default='', db_column='SocialSecurityBank', verbose_name='社保银行')
+    SocialSecurityAccount = models.CharField(max_length=64, default='', db_column='SocialSecurityAccount', verbose_name='社保账号')
+    LegalPersonName = models.CharField(max_length=64, default='', db_column='LegalPersonName', verbose_name='法人姓名')
+    LegalPersonIDCard = models.CharField(max_length=32, default='', db_column='LegalPersonIDCard', verbose_name='法人身份证')
+    LegalPersonGender = models.CharField(max_length=16, default='', db_column='LegalPersonGender', verbose_name='法人性别')
+    LegalPersonBirthday = models.CharField(max_length=32, default='', db_column='LegalPersonBirthday', verbose_name='法人生日')
+    LegalPersonNationality = models.CharField(max_length=32, default='', db_column='LegalPersonNationality', verbose_name='法人国籍')
+    LegalPersonEducation = models.CharField(max_length=32, default='', db_column='LegalPersonEducation', verbose_name='法人学历')
+    LegalPersonPhone = models.CharField(max_length=32, default='', db_column='LegalPersonPhone', verbose_name='法人电话')
+    LegalPersonEmail = models.CharField(max_length=128, default='', db_column='LegalPersonEmail', verbose_name='法人邮箱')
+    LegalPersonAddress = models.CharField(max_length=256, default='', db_column='LegalPersonAddress', verbose_name='法人地址')
+    LegalPersonPosition = models.CharField(max_length=32, default='', db_column='LegalPersonPosition', verbose_name='法人职务')
+    LegalPersonShareRatio = models.CharField(max_length=16, default='', db_column='LegalPersonShareRatio', verbose_name='法人持股比例')
+    LegalPersonAppointment = models.CharField(max_length=32, default='', db_column='LegalPersonAppointment', verbose_name='法人任职')
+    OperatorName = models.CharField(max_length=64, default='', db_column='OperatorName', verbose_name='经办人姓名')
+    OperatorIDCard = models.CharField(max_length=32, default='', db_column='OperatorIDCard', verbose_name='经办人身份证')
+    OperatorPhone = models.CharField(max_length=32, default='', db_column='OperatorPhone', verbose_name='经办人电话')
+    OperatorEmail = models.CharField(max_length=128, default='', db_column='OperatorEmail', verbose_name='经办人邮箱')
+    OperatorDepartment = models.CharField(max_length=128, default='', db_column='OperatorDepartment', verbose_name='经办人部门')
+    OperatorPosition = models.CharField(max_length=64, default='', db_column='OperatorPosition', verbose_name='经办人职务')
+    FinanceManagerName = models.CharField(max_length=64, default='', db_column='FinanceManagerName', verbose_name='财务负责人')
+    FinanceManagerPhone = models.CharField(max_length=32, default='', db_column='FinanceManagerPhone', verbose_name='财务电话')
+    FinanceManagerEmail = models.CharField(max_length=128, default='', db_column='FinanceManagerEmail', verbose_name='财务邮箱')
+    FinanceManagerIDCard = models.CharField(max_length=32, default='', db_column='FinanceManagerIDCard', verbose_name='财务身份证')
+    Remark = models.TextField(default='', db_column='Remark', verbose_name='备注')
+    ReviewStatus = models.SmallIntegerField(default=0, db_column='ReviewStatus', verbose_name='审核状态')
+    ReviewRemark = models.CharField(max_length=512, default='', db_column='ReviewRemark', verbose_name='审核备注')
+    ReviewerUUID = UUIDField(null=True, blank=True, db_column='ReviewerUUID', verbose_name='审核人UUID')
+    ReviewTime = models.DateTimeField(null=True, blank=True, db_column='ReviewTime', verbose_name='审核时间')
+    CreatorUUID = UUIDField(null=True, blank=True, db_column='CreatorUUID', verbose_name='创建人UUID')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'CompanyInfo'
+        ordering = ['-CreateTime']
+        verbose_name = '企业信息'
+        verbose_name_plural = '企业信息'
+
+
+class DepartmentSMTM(QModel):
+    """部门主管表——部门负责人映射（映射 SAAS 主库 DepartmentSMTM 表）"""
+
+    SMTMUUID = UUIDField(primary_key=True, db_column='SMTMUUID', verbose_name='关联UUID')
+    DepartmentUUID = UUIDField(db_column='DepartmentUUID', verbose_name='部门UUID')
+    UserUUID = UUIDField(db_column='UserUUID', verbose_name='用户UUID')
+    PersonInChargeStatus = models.SmallIntegerField(default=0, db_column='PersonInChargeStatus', verbose_name='负责人状态')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'DepartmentSMTM'
+        verbose_name = '部门主管'
+        verbose_name_plural = '部门主管'
+
+
+class Workgroup(QModel):
+    """工作组表——跨部门协作单元（映射 SAAS 主库 Workgroup 表）"""
+
+    WorkgroupUUID = UUIDField(primary_key=True, db_column='WorkgroupUUID', verbose_name='工作组UUID')
+    CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
+    WorkgroupName = models.CharField(max_length=256, db_column='WorkgroupName', verbose_name='工作组名称')
+    WorkgroupEnglishName = models.CharField(max_length=256, db_column='WorkgroupEnglishName', verbose_name='工作组英文名')
+    WorkgroupIntroduction = models.CharField(max_length=1024, db_column='WorkgroupIntroduction', verbose_name='工作组介绍')
+    WorkgroupType = models.SmallIntegerField(default=0, db_column='WorkgroupType', verbose_name='工作组类型')  # 0=部门工作组，1=跨部门工作组
+    WorkgroupTags = models.CharField(max_length=512, null=True, blank=True, db_column='WorkgroupTags', verbose_name='工作组标签')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'Workgroup'
+        verbose_name = '工作组'
+        verbose_name_plural = '工作组'
+
+
+class SimulatedTrigger(QModel):
+    """模拟触发器表——自动化规则引擎（映射 SAAS 主库 SimulatedTrigger 表）"""
+
+    SimulatedTriggerUUID = UUIDField(primary_key=True, db_column='SimulatedTriggerUUID', verbose_name='触发器UUID')
+    SimulatedTriggerPublisherUserUUID = UUIDField(db_column='SimulatedTriggerPublisherUserUUID', verbose_name='发布者UUID')
+    SimulatedTriggerName = models.CharField(max_length=128, db_column='SimulatedTriggerName', verbose_name='触发器名称')
+    SimulatedTriggerFilePath = models.CharField(max_length=512, db_column='SimulatedTriggerFilePath', verbose_name='文件路径')
+    SimulatedTriggerCode = models.TextField(db_column='SimulatedTriggerCode', verbose_name='触发器代码')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'SimulatedTrigger'
+        verbose_name = '模拟触发器'
+        verbose_name_plural = '模拟触发器'
+
+
+class CashReceiptsPaymentsLedger(QModel):
+    """现金收支台账表——财务流水记录（映射 SAAS 主库 CashBook 表）"""
+
+    CashBookUUID = UUIDField(primary_key=True, db_column='CashBookUUID', verbose_name='台账UUID')
+    CashBookCreateTime = models.DateTimeField(default=_UtcNow, db_column='CashBookCreateTime', verbose_name='创建时间')
+    CashBookTransactionType = models.SmallIntegerField(default=0, db_column='CashBookTransactionType', verbose_name='交易类型')
+    CashBookAmount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, db_column='CashBookAmount', verbose_name='金额')
+    CashBookCurrency = models.CharField(max_length=10, default='CNY', db_column='CashBookCurrency', verbose_name='币种')
+    CashBookDescription = models.CharField(max_length=512, db_column='CashBookDescription', verbose_name='描述')
+    CashBookTransactionTime = models.DateTimeField(default=_UtcNow, db_column='CashBookTransactionTime', verbose_name='交易时间')
+    CashBookUserUUID = UUIDField(db_column='CashBookUserUUID', verbose_name='用户UUID')
+    CashBookStatus = models.SmallIntegerField(default=0, db_column='CashBookStatus', verbose_name='状态')
+    CashBookRemark = models.CharField(max_length=1024, null=True, blank=True, db_column='CashBookRemark', verbose_name='备注')
+    CashBookMetaData = models.JSONField(null=True, blank=True, db_column='CashBookMetaData', verbose_name='元数据')
+    CashBookCategory = models.CharField(max_length=50, default='其它', db_column='CashBookCategory', verbose_name='分类')
+    CashBookPaymentMethod = models.CharField(max_length=50, default='', db_column='CashBookPaymentMethod', verbose_name='支付方式')
+    CashBookPaymentDetails = models.CharField(max_length=512, null=True, blank=True, db_column='CashBookPaymentDetails', verbose_name='支付详情')
+    CashBookInvoiceNo = models.CharField(max_length=100, null=True, blank=True, db_column='CashBookInvoiceNo', verbose_name='发票号')
+    CashBookTaxRate = models.DecimalField(max_digits=4, decimal_places=2, default=0.00, db_column='CashBookTaxRate', verbose_name='税率')
+    CashBookTaxAmount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, db_column='CashBookTaxAmount', verbose_name='税额')
+    CashBookNetAmount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, db_column='CashBookNetAmount', verbose_name='净额')
+    CashBookProjectUUID = UUIDField(null=True, blank=True, db_column='CashBookProjectUUID', verbose_name='项目UUID')
+    CashBookOrderUUID = UUIDField(null=True, blank=True, db_column='CashBookOrderUUID', verbose_name='订单UUID')
+    CashBookDepartmentUUID = UUIDField(null=True, blank=True, db_column='CashBookDepartmentUUID', verbose_name='部门UUID')
+    CashBookAttachmentPath = models.CharField(max_length=512, null=True, blank=True, db_column='CashBookAttachmentPath', verbose_name='附件路径')
+    CashBookExchangeRate = models.DecimalField(max_digits=10, decimal_places=4, default=1.0000, db_column='CashBookExchangeRate', verbose_name='汇率')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'CashBook'
+        verbose_name = '现金收支台账'
+        verbose_name_plural = '现金收支台账'
+        indexes = [
+            models.Index(fields=['CashBookTransactionTime'], name='idx_transaction_time'),
+            models.Index(fields=['CashBookTransactionType'], name='idx_transaction_type'),
+            models.Index(fields=['CashBookStatus'], name='idx_status'),
+            models.Index(fields=['CashBookCategory'], name='idx_category'),
+        ]
+
+
+class Asset(QModel):
+    """资产表——企业资产记录（映射 SAAS 主库 Asset 表）"""
+
+    AssetUUID = UUIDField(primary_key=True, db_column='AssetUUID', verbose_name='资产UUID')
+    AssetType = models.CharField(max_length=50, db_column='AssetType', verbose_name='资产类型')
+    AssetAmount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, db_column='AssetAmount', verbose_name='金额')
+    AssetCurrency = models.CharField(max_length=10, default='CNY', db_column='AssetCurrency', verbose_name='币种')
+    AssetDescription = models.CharField(max_length=512, db_column='AssetDescription', verbose_name='描述')
+    AssetCreateTime = models.DateTimeField(default=_UtcNow, db_column='AssetCreateTime', verbose_name='创建时间')
+    AssetUserUUID = UUIDField(db_column='AssetUserUUID', verbose_name='用户UUID')
+    AssetStatus = models.SmallIntegerField(default=0, db_column='AssetStatus', verbose_name='状态')
+    AssetMetaData = models.JSONField(null=True, blank=True, db_column='AssetMetaData', verbose_name='元数据')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'Asset'
+        verbose_name = '资产'
+        verbose_name_plural = '资产'
+
+
+class Liability(QModel):
+    """负债表——企业负债记录（映射 SAAS 主库 Liability 表）"""
+
+    LiabilityUUID = UUIDField(primary_key=True, db_column='LiabilityUUID', verbose_name='负债UUID')
+    LiabilityType = models.CharField(max_length=50, db_column='LiabilityType', verbose_name='负债类型')
+    LiabilityAmount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, db_column='LiabilityAmount', verbose_name='金额')
+    LiabilityCurrency = models.CharField(max_length=10, default='CNY', db_column='LiabilityCurrency', verbose_name='币种')
+    LiabilityDescription = models.CharField(max_length=512, db_column='LiabilityDescription', verbose_name='描述')
+    LiabilityCreateTime = models.DateTimeField(default=_UtcNow, db_column='LiabilityCreateTime', verbose_name='创建时间')
+    LiabilityUserUUID = UUIDField(db_column='LiabilityUserUUID', verbose_name='用户UUID')
+    LiabilityStatus = models.SmallIntegerField(default=0, db_column='LiabilityStatus', verbose_name='状态')
+    LiabilityMetaData = models.JSONField(null=True, blank=True, db_column='LiabilityMetaData', verbose_name='元数据')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'Liability'
+        verbose_name = '负债'
+        verbose_name_plural = '负债'
