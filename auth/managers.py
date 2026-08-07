@@ -1,7 +1,7 @@
 import uuid
 from django.utils import timezone as _timezone
 
-from gvsdsdk.models import Role, UserRole, RolePermission, Permission, Position, PositionTemplate, PositionTemplatePermission, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant
+from gvsdsdk.models import Role, UserRole, RolePermission, Permission, Position, PositionTemplate, PositionTemplatePermission, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, UserRoleDepartment
 from gvsdsdk.auth.crypto import HashPassword, VerifyPassword
 from gvsdsdk.model_utils import _GetUserModel, UUIDObj
 
@@ -1198,4 +1198,60 @@ class TenantManager:
         tenant.ReviewTime = _timezone.now()
         tenant.save(update_fields=['ReviewStatus', 'ReviewRemark', 'ReviewerUUID', 'ReviewTime'])
         return tenant, None
+
+
+class CompanyManager:
+    """公司管理器——公司查询与用户公司归属"""
+
+    @staticmethod
+    def GetCompanyByUUID(CompanyUUID):
+        """按 UUID 查询公司（不存在返回 None）"""
+        try:
+            return Company.objects.get(CompanyUUID=UUIDObj(CompanyUUID).bytes)
+        except (Company.DoesNotExist, ValueError, AttributeError):
+            return None
+
+    @staticmethod
+    def GetCompaniesForUser(UserUUID):
+        """获取用户所属公司列表（通过 UserRole.CompanyUUID 直接关联，去重）"""
+        if not UserUUID:
+            return Company.objects.none()
+        try:
+            user_bytes = UUIDObj(UserUUID).bytes
+        except Exception:
+            user_bytes = UserUUID
+        company_uuids = UserRole.objects.filter(
+            UserUUID=user_bytes,
+            CompanyUUID__isnull=False,
+        ).values_list('CompanyUUID', flat=True)
+        return Company.objects.filter(CompanyUUID__in=list(company_uuids)).distinct()
+
+
+class DepartmentManager:
+    """部门管理器——部门查询与用户部门归属"""
+
+    @staticmethod
+    def GetDepartmentByUUID(DeptUUID):
+        """按 UUID 查询部门（不存在返回 None）"""
+        try:
+            return Department.objects.get(DeptUUID=UUIDObj(DeptUUID).bytes)
+        except (Department.DoesNotExist, ValueError, AttributeError):
+            return None
+
+    @staticmethod
+    def GetDepartmentsForUser(UserUUID):
+        """获取用户部门列表（UserRole → UserRoleDepartment → Department，去重）"""
+        if not UserUUID:
+            return Department.objects.none()
+        try:
+            user_bytes = UUIDObj(UserUUID).bytes
+        except Exception:
+            user_bytes = UserUUID
+        ur_uuids = UserRole.objects.filter(
+            UserUUID=user_bytes,
+        ).values_list('UserRoleUUID', flat=True)
+        dept_uuids = UserRoleDepartment.objects.filter(
+            UserRoleUUID__in=list(ur_uuids),
+        ).values_list('DeptUUID', flat=True)
+        return Department.objects.filter(DeptUUID__in=list(dept_uuids)).distinct()
 

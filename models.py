@@ -472,6 +472,71 @@ class Tenant(QModel):
         return self.TenantName
 
 
+# === 公司/部门表 ===
+
+class Company(QModel):
+    """公司表——系统内组织机构（映射 SAAS 主库 Company 表）"""
+
+    CompanyUUID = UUIDField(primary_key=True, db_column='CompanyUUID', verbose_name='公司UUID')
+    TenantUUID = UUIDField(db_column='TenantUUID', verbose_name='租户UUID')
+    ParentCompanyUUID = UUIDField(null=True, blank=True, db_column='ParentCompanyUUID', verbose_name='上级公司UUID')
+    CompanyName = models.CharField(max_length=256, db_column='CompanyName', verbose_name='公司全称')
+    CompanyShort = models.CharField(max_length=100, db_column='CompanyShort', verbose_name='公司简称')
+    CompanyIcon = models.CharField(max_length=512, null=True, blank=True, db_column='CompanyIcon', verbose_name='公司图标')
+    CompanyStatus = models.SmallIntegerField(default=1, db_column='CompanyStatus', verbose_name='公司状态')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'Company'
+        verbose_name = '公司'
+        verbose_name_plural = '公司'
+
+    def __str__(self):
+        return self.CompanyName
+
+
+class Department(QModel):
+    """部门表——组织架构层级（映射 SAAS 主库 Dept 表）"""
+
+    DeptUUID = UUIDField(primary_key=True, db_column='DeptUUID', verbose_name='部门UUID')
+    CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
+    ParentDeptUUID = UUIDField(null=True, blank=True, db_column='ParentDeptUUID', verbose_name='上级部门UUID')
+    DeptName = models.CharField(max_length=256, db_column='DeptName', verbose_name='部门名称')
+    DeptSort = models.IntegerField(default=0, db_column='DeptSort', verbose_name='排序')
+    DeptStatus = models.SmallIntegerField(default=1, db_column='DeptStatus', verbose_name='部门状态')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'Dept'
+        verbose_name = '部门'
+        verbose_name_plural = '部门'
+
+    def __str__(self):
+        return self.DeptName
+
+
+class UserRoleDepartment(QModel):
+    """用户-角色对 与 部门 的多对多关联表（映射 SAAS 主库 UserRoleDepartment 表）"""
+
+    UserRoleDepartmentUUID = UUIDField(primary_key=True, db_column='UserRoleDepartmentUUID', verbose_name='关联UUID')
+    UserRoleUUID = UUIDField(db_column='UserRoleUUID', verbose_name='用户-角色关联UUID')
+    DeptUUID = UUIDField(db_column='DeptUUID', verbose_name='部门UUID')
+    CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
+    RoleType = models.SmallIntegerField(default=0, db_column='RoleType', verbose_name='角色类型')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'UserRoleDepartment'
+        verbose_name = '用户-角色部门关联'
+        verbose_name_plural = '用户-角色部门关联'
+
+
 # === 角色表 ===
 
 class Role(QModel):
