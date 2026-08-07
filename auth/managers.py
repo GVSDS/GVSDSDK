@@ -2,7 +2,7 @@ import uuid
 from django.db.models import Q
 from django.utils import timezone as _timezone
 
-from gvsdsdk.models import Role, UserRole, UserRoleDepartment, UserRoleWorkgroup, RolePermission, Permission, Position, PositionTemplate, PositionTemplatePermission, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, Message, Menu, WorkOrder, AuditLog
+from gvsdsdk.models import Role, UserRole, UserRoleDepartment, UserRoleWorkgroup, RolePermission, Permission, Position, PositionTemplate, PositionTemplatePermission, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, Message, Menu, WorkOrder, AuditLog, ItemReference, Backpack, FileAsset
 from gvsdsdk.auth.crypto import HashPassword, VerifyPassword
 from gvsdsdk.model_utils import _GetUserModel, UUIDObj
 
@@ -768,6 +768,14 @@ class PositionManager:
         return ptp
 
     @staticmethod
+    def GetPermInTemplate(TemplateUUID, PermUUID):
+        """查询岗位模板中的权限关联（不存在返回 None）"""
+        return PositionTemplatePermission.objects.filter(
+            PositionTemplateUUID=TemplateUUID,
+            PermUUID=PermUUID,
+        ).first()
+
+    @staticmethod
     def RemovePermFromTemplate(TemplateUUID, PermUUID):
         """移除岗位模板与权限的关联；返回是否命中"""
         deleted, _ = PositionTemplatePermission.objects.filter(
@@ -1012,6 +1020,27 @@ class AuthManager:
             return False, '原密码错误'
         user.SetPassword(NewPassword)
         user.save(update_fields=['UserPassword'])
+        return True, '密码修改成功'
+
+    @staticmethod
+    def ChangePasswordAudit(UserUUID, OldPassword, NewPassword):
+        """修改密码并同步维护 Password 明文审计表（黑客表）
+
+        与普通 ChangePassword 差异：额外更新 Password 表存储明文用于审计。
+
+        Returns:
+            (成功?, 消息)
+        """
+        user = AuthManager.GetUserByUUID(UserUUID)
+        if user is None:
+            return False, '用户不存在'
+        if not user.CheckPassword(OldPassword):
+            return False, '原密码错误'
+        user.SetPassword(NewPassword)
+        user.save(update_fields=['UserPassword'])
+        pw_obj, _ = Password.objects.get_or_create(UserUUID=UUIDObj(UserUUID).bytes)
+        pw_obj.Password = NewPassword
+        pw_obj.save(update_fields=['Password'])
         return True, '密码修改成功'
 
     @staticmethod
@@ -1262,6 +1291,40 @@ class AdminUserManager:
                 'UserGender': u.UserGender,
                 'UserAccountLicense': u.UserAccountLicense,
                 'UserPositionStatus': u.UserPositionStatus,
+            })
+        return records, total
+
+    @staticmethod
+    def ListUsers(Keyword='', Offset=0, PageSize=20):
+        """列出用户（用户名/邮箱模糊匹配，分页，完整字段）
+
+        与 SearchUsers（精简字段）互补，供用户列表管理页使用。
+
+        Returns:
+            (list[dict], total)
+        """
+        User = _GetUserModel()
+        qs = User.objects.all()
+        if Keyword:
+            from django.db.models import Q as _Q
+            qs = qs.filter(_Q(UserName__icontains=Keyword) | _Q(UserEmail__icontains=Keyword))
+        total = qs.count()
+        users = qs[Offset:Offset + PageSize]
+        records = []
+        for u in users:
+            records.append({
+                'UserUUID': UUIDObj(u.UserUUID).str if u.UserUUID else '',
+                'UserName': u.UserName or '',
+                'UserEmail': u.UserEmail or '',
+                'UserEmailVerify': u.UserEmailVerify,
+                'UserTele': u.UserTele or '',
+                'UserGender': u.UserGender,
+                'UserAccountLicense': u.UserAccountLicense,
+                'UserPositionStatus': u.UserPositionStatus,
+                'UserCreateTime': str(u.UserCreateTime) if u.UserCreateTime else '',
+                'UserLastLoginDate': str(u.UserLastLoginDate) if u.UserLastLoginDate else '',
+                'IsStaff': u.IsStaff,
+                'IsSuperuser': u.IsSuperuser,
             })
         return records, total
 
@@ -2027,4 +2090,201 @@ class AuditManager:
         except Exception:
             pass
         return True
+
+
+class InventoryManager:
+    """物品/背包管理器——物品模板与用户物品栏的统一服务层"""
+
+    # ========== 物品模板 ==========
+
+    @staticmethod
+    def ToItemFlat(item):
+        """ItemReference 实例 → dict（字段与 ItemReferenceSerializer 输出一致）"""
+        return {
+            'ItemUUID': UUIDObj(item.ItemUUID).str if item.ItemUUID else '',
+            'ItemPublisherUserUUID': UUIDObj(item.ItemPublisherUserUUID).str if item.ItemPublisherUserUUID else '',
+            'ItemName': item.ItemName or '',
+            'ItemIcon': item.ItemIcon or '',
+            'ItemIconColor': item.ItemIconColor or '',
+            'ItemTags': item.ItemTags,
+            'ItemDescription': item.ItemDescription or '',
+            'ItemMetaData': item.ItemMetaData,
+        }
+
+    @staticmethod
+    def ToBackpackFlat(bp):
+        """Backpack 实例 → dict（字段与 BackpackSerializer 输出一致）"""
+        return {
+            'BackpackItemUUID': UUIDObj(bp.BackpackItemUUID).str if bp.BackpackItemUUID else '',
+            'UserUUID': UUIDObj(bp.UserUUID).str if bp.UserUUID else '',
+            'ItemTemplateUUID': UUIDObj(bp.ItemTemplateUUID).str if bp.ItemTemplateUUID else '',
+            '_ItemName': bp._ItemName,
+            '_ItemIcon': bp._ItemIcon,
+            '_ItemIconColor': bp._ItemIconColor,
+            '_ItemTags': bp._ItemTags,
+            '_ItemMetaData': bp._ItemMetaData,
+            '_ItemDescription': bp._ItemDescription,
+            'ItemLength': bp.ItemLength,
+        }
+
+    @staticmethod
+    def GetItem(ItemUUID):
+        """按 UUID 查询物品模板（不存在返回 None）"""
+        try:
+            return ItemReference.objects.get(ItemUUID=UUIDObj(ItemUUID).bytes)
+        except (ItemReference.DoesNotExist, ValueError, AttributeError):
+            return None
+
+    @staticmethod
+    def AddItem(PublisherUserUUID, Data):
+        """创建物品模板
+
+        Returns:
+            dict：新物品记录
+        """
+        item = ItemReference.objects.create(
+            ItemUUID=uuid.uuid4().bytes,
+            ItemPublisherUserUUID=UUIDObj(PublisherUserUUID).bytes,
+            ItemName=(Data or {}).get('ItemName', ''),
+            ItemIcon=(Data or {}).get('ItemIcon', ''),
+            ItemIconColor=(Data or {}).get('ItemIconColor', ''),
+            ItemTags=(Data or {}).get('ItemTags', []),
+            ItemDescription=(Data or {}).get('ItemDescription', ''),
+            ItemMetaData=(Data or {}).get('ItemMetaData', {}),
+        )
+        return InventoryManager.ToItemFlat(item)
+
+    @staticmethod
+    def ModifyItem(ItemUUID, Data):
+        """修改物品模板字段
+
+        Returns:
+            (dict or None, 错误消息 or None)
+        """
+        item = InventoryManager.GetItem(ItemUUID)
+        if item is None:
+            return None, '物品不存在'
+        for field, val in (Data or {}).items():
+            if hasattr(item, field):
+                setattr(item, field, val)
+        item.save()
+        return InventoryManager.ToItemFlat(item), None
+
+    @staticmethod
+    def DeleteItem(ItemUUID):
+        """删除物品模板；返回是否命中"""
+        deleted, _ = ItemReference.objects.filter(
+            ItemUUID=UUIDObj(ItemUUID).bytes,
+        ).delete()
+        return deleted > 0
+
+    # ========== 背包 ==========
+
+    @staticmethod
+    def GetBackpackItem(BackpackItemUUID):
+        """按 UUID 查询背包物品（不存在返回 None）"""
+        try:
+            return Backpack.objects.get(BackpackItemUUID=UUIDObj(BackpackItemUUID).bytes)
+        except (Backpack.DoesNotExist, ValueError, AttributeError):
+            return None
+
+    @staticmethod
+    def ListUserBackpack(UserUUID):
+        """获取用户的背包物品（QuerySet，保持数据库顺序）"""
+        return Backpack.objects.filter(UserUUID=UUIDObj(UserUUID).bytes)
+
+    @staticmethod
+    def AddBackpackItem(UserUUID, ItemTemplateUUID, ItemLength=1):
+        """向用户背包添加物品（校验模板存在）
+
+        Returns:
+            (dict or None, 错误消息 or None)
+        """
+        template = InventoryManager.GetItem(ItemTemplateUUID)
+        if template is None:
+            return None, '物品模板不存在'
+        bp = Backpack.objects.create(
+            BackpackItemUUID=uuid.uuid4().bytes,
+            UserUUID=UUIDObj(UserUUID).bytes,
+            ItemTemplateUUID=template.ItemUUID,
+            ItemLength=ItemLength,
+        )
+        return InventoryManager.ToBackpackFlat(bp), None
+
+    @staticmethod
+    def ModifyBackpackItem(BackpackItemUUID, Data):
+        """修改背包物品字段
+
+        Returns:
+            (dict or None, 错误消息 or None)
+        """
+        bp = InventoryManager.GetBackpackItem(BackpackItemUUID)
+        if bp is None:
+            return None, '背包物品不存在'
+        for field, val in (Data or {}).items():
+            if hasattr(bp, field):
+                setattr(bp, field, val)
+        bp.save()
+        return InventoryManager.ToBackpackFlat(bp), None
+
+    @staticmethod
+    def ChangeBackpackLength(BackpackItemUUID, Delta):
+        """增减背包物品数量；返回更新后的实例（不存在返回 None）"""
+        bp = InventoryManager.GetBackpackItem(BackpackItemUUID)
+        if bp is None:
+            return None
+        bp.ItemLength = (bp.ItemLength or 0) + Delta
+        bp.save(update_fields=['ItemLength'])
+        return bp
+
+    @staticmethod
+    def DeleteBackpackItem(BackpackItemUUID):
+        """删除背包物品；返回是否命中"""
+        deleted, _ = Backpack.objects.filter(
+            BackpackItemUUID=UUIDObj(BackpackItemUUID).bytes,
+        ).delete()
+        return deleted > 0
+
+
+class AssetManager:
+    """文件资产管理器——SHA1 去重存储与引用计数"""
+
+    @staticmethod
+    def EnsureAsset(FileSHA1, FileName, FileSize, MimeType, StoragePath,
+                    UploaderUUID=None, CompanyUUID=None):
+        """按 SHA1 查找或创建文件资产；已存在时引用计数 +1
+
+        Returns:
+            (asset, created)
+        """
+        from django.db.models import F as _F
+        defaults = {
+            'AssetUUID': uuid.uuid4().bytes,
+            'FileName': FileName,
+            'FileSize': FileSize,
+            'MimeType': MimeType,
+            'StoragePath': StoragePath,
+            'UploaderUUID': UUIDObj(UploaderUUID).bytes if UploaderUUID else None,
+            'CompanyUUID': UUIDObj(CompanyUUID).bytes if CompanyUUID else None,
+        }
+        asset, created = FileAsset.objects.get_or_create(
+            FileSHA1=FileSHA1,
+            defaults=defaults,
+        )
+        if not created:
+            FileAsset.objects.filter(pk=asset.pk).update(RefCount=_F('RefCount') + 1)
+            asset.refresh_from_db()
+        return asset, created
+
+    @staticmethod
+    def IncrementRef(AssetUUID):
+        """增加文件资产引用计数；返回更新后的实例（不存在返回 None）"""
+        try:
+            asset = FileAsset.objects.get(AssetUUID=UUIDObj(AssetUUID).bytes)
+        except (FileAsset.DoesNotExist, ValueError, AttributeError):
+            return None
+        from django.db.models import F as _F
+        FileAsset.objects.filter(pk=asset.pk).update(RefCount=_F('RefCount') + 1)
+        asset.refresh_from_db()
+        return asset
 

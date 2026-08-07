@@ -1099,3 +1099,95 @@ class AuditLog(QModel):
 
     def __str__(self):
         return f'{self.TableName}/{self.Action}'
+
+
+# === 物品引用表 ===
+
+class ItemReference(QModel):
+    """物品引用表——物品模板定义（映射 SAAS 主库 ItemReference 表）"""
+
+    ItemUUID = UUIDField(primary_key=True, db_column='ItemUUID', verbose_name='物品UUID')
+    ItemPublisherUserUUID = UUIDField(db_column='ItemPublisherUserUUID', verbose_name='发布者UUID')
+    ItemName = models.CharField(max_length=128, db_column='ItemName', verbose_name='物品名称')
+    ItemIcon = models.CharField(max_length=512, db_column='ItemIcon', verbose_name='物品图标')
+    ItemIconColor = models.CharField(max_length=6, db_column='ItemIconColor', verbose_name='图标颜色')
+    ItemTags = models.JSONField(default=list, db_column='ItemTags', verbose_name='标签')
+    ItemDescription = models.TextField(default='', db_column='ItemDescription', verbose_name='描述')
+    ItemMetaData = models.JSONField(default=dict, db_column='ItemMetaData', verbose_name='元数据')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'ItemReference'
+        verbose_name = '物品模板'
+        verbose_name_plural = '物品模板'
+
+    def __str__(self):
+        return self.ItemName
+
+
+# === 背包表 ===
+
+class Backpack(QModel):
+    """背包表——用户物品栏（映射 SAAS 主库 Backpack 表）"""
+
+    BackpackItemUUID = UUIDField(primary_key=True, db_column='BackpackItemUUID', verbose_name='背包物品UUID')
+    UserUUID = UUIDField(db_index=True, db_column='UserUUID', verbose_name='用户UUID')
+    ItemTemplateUUID = UUIDField(db_column='ItemTemplateUUID', verbose_name='物品模板UUID')
+    _ItemName = models.CharField(max_length=128, null=True, blank=True, db_column='_ItemName', verbose_name='物品名称缓存')
+    _ItemIcon = models.CharField(max_length=512, null=True, blank=True, db_column='_ItemIcon', verbose_name='物品图标缓存')
+    _ItemIconColor = models.CharField(max_length=6, null=True, blank=True, db_column='_ItemIconColor', verbose_name='图标颜色缓存')
+    _ItemTags = models.JSONField(null=True, blank=True, db_column='_ItemTags', verbose_name='标签缓存')
+    _ItemMetaData = models.JSONField(null=True, blank=True, db_column='_ItemMetaData', verbose_name='元数据缓存')
+    _ItemDescription = models.TextField(null=True, blank=True, db_column='_ItemDescription', verbose_name='描述缓存')
+    ItemLength = models.BigIntegerField(default=1, db_column='ItemLength', verbose_name='数量')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'Backpack'
+        verbose_name = '背包'
+        verbose_name_plural = '背包'
+
+    @property
+    def ItemReference(self):
+        return self.ItemTemplateUUID
+
+    @property
+    def ItemNameResolved(self):
+        return self._ItemName
+
+    @property
+    def ItemIconResolved(self):
+        return self._ItemIcon
+
+    def __str__(self):
+        return f'{self._ItemName or self.ItemTemplateUUID}x{self.ItemLength}'
+
+
+# === 文件资产表 ===
+
+class FileAsset(QModel):
+    """文件资产表——文件存储与引用管理（映射 SAAS 主库 FileAsset 表）"""
+
+    AssetUUID = UUIDField(primary_key=True, db_column='AssetUUID', verbose_name='资产UUID')
+    CompanyUUID = UUIDField(null=True, blank=True, db_column='CompanyUUID', verbose_name='公司UUID')
+    FileName = models.CharField(max_length=256, db_column='FileName', verbose_name='文件名')
+    FileSHA1 = models.CharField(max_length=40, unique=True, db_column='FileSHA1', verbose_name='文件SHA1')
+    FileSize = models.IntegerField(db_column='FileSize', verbose_name='文件大小')
+    MimeType = models.CharField(max_length=128, db_column='MimeType', verbose_name='MIME类型')
+    StoragePath = models.CharField(max_length=512, db_column='StoragePath', verbose_name='存储路径')
+    UploaderUUID = UUIDField(db_column='UploaderUUID', verbose_name='上传者UUID')
+    RefCount = models.IntegerField(default=0, db_column='RefCount', verbose_name='引用计数')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'FileAsset'
+        ordering = ['-CreateTime']
+        verbose_name = '文件资产'
+        verbose_name_plural = '文件资产'
+
+    def __str__(self):
+        return self.FileName
