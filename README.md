@@ -5,7 +5,7 @@
 > **混合实现策略**：
 >   - **自有实现**（无 Django 依赖，子服务器开箱即用）：`msync.auth`（HMAC 签名 + `ServiceTokenEncoder`）、`msync.client`（REST 客户端）、`msync.local_tx`（本地事务）、`fluent`（FluentQuery ORM）、`models`（SAAS 数据模型）、`form_service`（通用 CRUD 引擎）
 >   - **转发自主服务器**（依赖 Django ORM，仅主服务器可加载）：`msync.auth` 中的 `AuthenticateService` / `RefreshServiceToken` / `ValidateAccessToken` / `IssueServiceToken`、`msync.registry`、`msync.ogm`、`msync.transaction`
->   - **完整业务模块**：`auth`（用户认证/权限）、`commission`（分佣引擎）、`payment`（支付网关）、`order`（订单）、`minecraft`（MC 插件）
+>   - **完整业务模块**：`auth`（用户认证/权限）、`commission`（分佣引擎）、`payment`（支付网关）、`order`（订单）、`stats`（统计引擎）
 >
 > **版本兼容**：主从两端必须使用同一 SDK 版本（当前 `1.0.0`）。
 
@@ -17,13 +17,13 @@
 
 **子服务器可独立使用**（不依赖 GVSDS 主服务器代码）：
 
-- **用户认证与权限**（`gvsdsdk.auth`）：密码哈希、AES 加密、文件/字节摘要、CurrentRoleMiddleware、RBAC/ABAC 权限、RoleManager / ShopManager / PositionManager
+- **用户认证与权限**（`gvsdsdk.auth`）：密码哈希、AES 加密、文件/字节摘要、CurrentRoleMiddleware、RBAC/ABAC 权限、RoleManager / ShopManager / PositionManager / AuthManager / AdminUserManager / TenantManager / CompanyManager / DepartmentManager / MessageManager / MenuManager / WorkOrderManager / InventoryManager / AssetManager / AuditManager / UserService
 - **MSYNC 认证**（`gvsdsdk.msync.auth`）：HMAC-SHA256 签名 / 验签、`ServiceTokenEncoder` 为自有实现；`AuthenticateService` / `IssueServiceToken` / `ValidateAccessToken` / `RefreshServiceToken` 转发自主服务器
 - **分布式通信**（`gvsdsdk.msync`）：签名 / 客户端 / 本地事务为自有实现；服务注册 / OGM / Saga 事务转发自主服务器
-- **数据模型**（`gvsdsdk.models`）：User / Role / Permission / UserRole / Position 等 SAAS 核心表（managed=False）
+- **数据模型**（`gvsdsdk.models`）：User / Role / Permission / UserRole / Position / Menu / WorkOrder / AuditLog / ItemReference / Backpack / FileAsset 等 SAAS 核心表（managed=False）
 - **ORM 查询层**（`gvsdsdk.fluent`）：FluentQuery 链式查询
 - **CRUD 引擎**（`gvsdsdk.form_service`）：FormService 通用增改删查 API
-- **业务模块**：`commission`（分佣）/ `payment`（支付）/ `order`（订单）/ `minecraft`（MC 插件）
+- **业务模块**：`commission`（分佣）/ `payment`（支付）/ `order`（订单）/ `stats`（统计）
 
 **主服务器**（`gvsds`）：通过 `gvsdsdk` 与子服务器共享同一份 API 契约，同时直接 import `gvsds.apps.msync` 内部模块。
 
@@ -100,7 +100,7 @@ gvsdsdk/
 ├── commission/         # 分佣引擎
 ├── payment/            # 支付网关
 ├── order/              # 订单模板与订单
-├── minecraft/          # MC 插件扩展
+├── stats/              # 统计引擎
 ├── management/         # Django management 命令
 └── migrations/         # Django 数据迁移（gvsdsdk 自身表的）
 ```
