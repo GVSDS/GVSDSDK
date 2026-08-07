@@ -23,6 +23,7 @@ import datetime
 import logging
 from django.db import DatabaseError
 from django.db.models import Q
+from django.db.models.fields import NOT_PROVIDED
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,10 @@ def _PascalizeRecord(record, model=None):
                     column_map[f.attname] = f.db_column
     for key, val in record.items():
         out_key = column_map.get(key, key)
-        if isinstance(val, bytes) and len(val) == 16:
+        # UUIDObj 处理：gvsdsdk UUIDField 返回 UUIDObj 对象（非 bytes），需转为字符串
+        if val is not None and val.__class__.__name__ == 'UUIDObj':
+            val = val.str
+        elif isinstance(val, bytes) and len(val) == 16:
             try:
                 val = str(uuid.UUID(bytes=val))
             except ValueError:
@@ -92,7 +96,7 @@ class FormServiceBase:
                               'PositiveIntegerField', 'PositiveSmallIntegerField',
                               'FloatField', 'DecimalField'):
                 default = getattr(field, 'default', None)
-                if default is not None:
+                if default is not None and default is not NOT_PROVIDED:
                     return default
                 return 0
             if field_type == 'BooleanField':
