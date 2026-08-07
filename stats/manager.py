@@ -337,3 +337,253 @@ class StatsManager:
         if status is not None:
             qs = qs.filter(ConfigStatus=status)
         return qs
+
+    # ---------- 编排层（SAAS 主服务器视图 / Celery 任务入口） ----------
+
+    @staticmethod
+    def DefineMetric(tenant_uuid, metric_code, metric_name, metric_type='count',
+                     unit='次', default_value=None):
+        """定义统计指标（同编码已存在则更新）
+
+        Returns:
+            StatMetric 实例
+        """
+        metric, _created = StatMetric.objects.update_or_create(
+            TenantUUID=tenant_uuid,
+            MetricCode=metric_code,
+            defaults={
+                'MetricName': metric_name,
+                'MetricType': metric_type,
+                'Unit': unit,
+                'DefaultValue': default_value or 0,
+                'MetricStatus': 1,
+            },
+        )
+        return metric
+
+    @staticmethod
+    def DefineDimension(tenant_uuid, dimension_code, dimension_name):
+        """定义统计维度（同编码已存在则更新）
+
+        Returns:
+            StatDimension 实例
+        """
+        dim, _created = StatDimension.objects.update_or_create(
+            TenantUUID=tenant_uuid,
+            DimensionCode=dimension_code,
+            defaults={
+                'DimensionName': dimension_name,
+                'DimensionStatus': 1,
+            },
+        )
+        return dim
+
+    @staticmethod
+    def ConfigureAutoReset(tenant_uuid, metric_uuid, auto_reset=True,
+                           reset_cron='0 0 * * *', enable_ranking=False,
+                           ranking_top_n=50, retention_days=365):
+        """配置指标的自动重置和排行榜
+
+        Returns:
+            StatConfig 实例
+        """
+        config, _created = StatConfig.objects.update_or_create(
+            TenantUUID=tenant_uuid,
+            Metric_id=metric_uuid,
+            defaults={
+                'AutoReset': auto_reset,
+                'ResetCron': reset_cron,
+                'EnableRanking': enable_ranking,
+                'RankingTopN': ranking_top_n,
+                'RetentionDays': retention_days,
+                'ConfigStatus': 1,
+            },
+        )
+        return config
+
+    @staticmethod
+    def GenerateDailyRanking(tenant_uuid, metric_uuid, ranking_date=None,
+                             dimension_filter=None, top_n=50):
+        """生成日排行榜快照（先清理同日旧快照再生成）
+
+        Returns:
+            List[StatRanking]
+        """
+        import datetime
+        from gvsdsdk.stats.models import StatRanking
+
+        if ranking_date is None:
+            ranking_date = datetime.date.today()
+
+        StatRanking.objects.filter(
+            TenantUUID=tenant_uuid,
+            RankingPeriod='daily',
+            RankingDate=ranking_date,
+            Metric_id=metric_uuid,
+        ).delete()
+
+        return StatsManager.GenerateRanking(
+            tenant_uuid=tenant_uuid,
+            metric_uuid=metric_uuid,
+            ranking_period='daily',
+            ranking_date=ranking_date,
+            dimension_filter=dimension_filter,
+            top_n=top_n,
+        )
+
+    @staticmethod
+    def GenerateMonthlyRanking(tenant_uuid, metric_uuid, ranking_date=None,
+                               dimension_filter=None, top_n=50):
+        """生成月排行榜快照（先清理同日旧快照再生成）
+
+        Returns:
+            List[StatRanking]
+        """
+        import datetime
+        from gvsdsdk.stats.models import StatRanking
+
+        if ranking_date is None:
+            today = datetime.date.today()
+            ranking_date = today.replace(day=1)
+
+        StatRanking.objects.filter(
+            TenantUUID=tenant_uuid,
+            RankingPeriod='monthly',
+            RankingDate=ranking_date,
+            Metric_id=metric_uuid,
+        ).delete()
+
+        return StatsManager.GenerateRanking(
+            tenant_uuid=tenant_uuid,
+            metric_uuid=metric_uuid,
+            ranking_period='monthly',
+            ranking_date=ranking_date,
+            dimension_filter=dimension_filter,
+            top_n=top_n,
+        )
+
+    @staticmethod
+    def QueryRanking(tenant_uuid, ranking_period, ranking_date=None,
+                     metric_uuid=None, top_n=None):
+        """查询排行榜快照
+
+        Args:
+            ranking_period: 'daily' | 'monthly'
+            ranking_date: 排行日期
+            metric_uuid: 指标UUID（None=全部）
+            top_n: 取前N名（按指标分别截取）
+
+        Returns:
+            QuerySet[StatRanking]
+        """
+        from gvsdsdk.stats.models import StatRanking
+
+        qs = StatRanking.objects.filter(
+            TenantUUID=tenant_uuid,
+            RankingPeriod=ranking_period,
+        )
+        if ranking_date:
+            qs = qs.filter(RankingDate=ranking_date)
+        if metric_uuid:
+            qs = qs.filter(Metric_id=metric_uuid)
+
+        qs = qs.order_by('Metric', 'Rank')
+
+        if top_n:
+            metric_ids = qs.values_list('Metric_id', flat=True).distinct()
+            filtered = StatRanking.objects.none()
+            for mid in metric_ids:
+                filtered |= qs.filter(Metric_id=mid)[:top_n]
+            return filtered
+
+        return qs
+
+    @staticmethod
+    def DailyReset(tenant_uuid, metric_uuid, target_date=None):
+        """手动执行日清零（默认昨天）
+
+        Returns:
+            int 删除记录数
+        """
+        import datetime
+
+        if target_date is None:
+            target_date = datetime.date.today() - datetime.timedelta(days=1)
+
+        period_key = target_date.strftime('%Y-%m-%d')
+        return StatsManager.ResetPeriod(
+            tenant_uuid, metric_uuid, 'daily', period_key,
+        )
+
+    @staticmethod
+    def MonthlyReset(tenant_uuid, metric_uuid, target_date=None):
+        """手动执行月清零（默认上月）
+
+        Returns:
+            int 删除记录数
+        """
+        import datetime
+
+        if target_date is None:
+            today = datetime.date.today()
+            last_month = today.month - 1 if today.month > 1 else 12
+            last_year = today.year if today.month > 1 else today.year - 1
+            target_date = datetime.date(last_year, last_month, 1)
+
+        period_key = target_date.strftime('%Y-%m')
+        return StatsManager.ResetPeriod(
+            tenant_uuid, metric_uuid, 'monthly', period_key,
+        )
+
+    @staticmethod
+    def RunScheduledResets(tenant_uuid, target_date=None):
+        """执行所有配置了自动重置的指标的周期清零（默认清零昨天）
+
+        由 Celery Beat 定时任务调用。
+
+        Returns:
+            int 累计删除记录数
+        """
+        configs = StatConfig.objects.filter(
+            TenantUUID=tenant_uuid,
+            AutoReset=True,
+            ConfigStatus=1,
+        )
+
+        total_deleted = 0
+        for config in configs:
+            total_deleted += StatsManager.DailyReset(
+                tenant_uuid=tenant_uuid,
+                metric_uuid=config.Metric_id,
+                target_date=target_date,
+            )
+
+        return total_deleted
+
+    @staticmethod
+    def BuildRankings(tenant_uuid, target_date=None):
+        """执行所有配置了排行榜的指标的排名生成（默认今天）
+
+        由 Celery Beat 定时任务调用。
+
+        Returns:
+            int 累计生成的排行数
+        """
+        configs = StatConfig.objects.filter(
+            TenantUUID=tenant_uuid,
+            EnableRanking=True,
+            ConfigStatus=1,
+        )
+
+        total_rankings = 0
+        for config in configs:
+            rankings = StatsManager.GenerateDailyRanking(
+                tenant_uuid=tenant_uuid,
+                metric_uuid=config.Metric_id,
+                ranking_date=target_date,
+                dimension_filter=config.RankingDimensionFilter or None,
+                top_n=config.RankingTopN,
+            )
+            total_rankings += len(rankings)
+
+        return total_rankings
