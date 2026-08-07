@@ -537,6 +537,97 @@ class UserRoleDepartment(QModel):
         verbose_name_plural = '用户-角色部门关联'
 
 
+# === 消息表 ===
+
+class Message(QModel):
+    """消息表——系统通知与站内信（映射 SAAS 主库 Message 表）"""
+
+    MessageUUID = UUIDField(primary_key=True, db_column='MessageUUID', verbose_name='消息UUID')
+    SenderUUID = UUIDField(null=True, blank=True, db_column='SenderUUID', verbose_name='发送者UUID')
+    ReceiverUUID = UUIDField(db_index=True, db_column='ReceiverUUID', verbose_name='接收者UUID')
+    Title = models.CharField(max_length=256, db_column='Title', verbose_name='标题')
+    Content = models.TextField(default='', db_column='Content', verbose_name='内容')
+    MsgType = models.SmallIntegerField(default=0, db_column='MsgType', verbose_name='消息类型')
+    IsRead = models.SmallIntegerField(default=0, db_column='IsRead', verbose_name='已读')
+    RelatedUUID = models.CharField(max_length=64, default='', db_column='RelatedUUID', verbose_name='关联UUID')
+    RelatedType = models.CharField(max_length=32, default='', db_column='RelatedType', verbose_name='关联类型')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'Message'
+        verbose_name = '消息'
+        verbose_name_plural = '消息'
+
+    def __str__(self):
+        return self.Title
+
+
+# === 个人中心表 ===
+
+class UserIDCard(QModel):
+    """用户身份证表——实名信息（映射 SAAS 主库 UserIDCard 表）"""
+
+    UserUUID = UUIDField(primary_key=True, db_column='UserUUID', verbose_name='用户UUID')
+    Name = models.CharField(max_length=128, db_column='Name', verbose_name='姓名')
+    OldName = models.CharField(max_length=128, default='', db_column='OldName', verbose_name='曾用名')
+    Born = models.DateField(db_column='Born', verbose_name='出生日期')
+    Sex = models.CharField(max_length=10, db_column='Sex', verbose_name='性别')
+    Ethnic = models.CharField(max_length=20, db_column='Ethnic', verbose_name='民族')
+    IdentificationNumber = models.CharField(max_length=20, db_column='IdentificationNumber', verbose_name='身份证号')
+    StudentRegistrationNumber = models.CharField(max_length=30, default='', db_column='StudentRegistrationNumber', verbose_name='学籍号')
+    ChangeStudentStatus = models.JSONField(default=list, db_column='ChangeStudentStatus', verbose_name='学籍变动')
+    CorrespondenceAddress = models.JSONField(default=list, db_column='CorrespondenceAddress', verbose_name='通讯地址')
+    HeadImage = models.CharField(max_length=4096, default='', db_column='HeadImage', verbose_name='头像')
+    InformationAboutFamilyMembers = models.JSONField(default=dict, db_column='InformationAboutFamilyMembers', verbose_name='家庭成员信息')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'UserIDCard'
+        verbose_name = '用户身份证'
+        verbose_name_plural = '用户身份证'
+
+
+class PersonalPage(QModel):
+    """个人主页表——用户展示页面（映射 SAAS 主库 PersonalPage 表）"""
+
+    PersonalPageUserUUID = UUIDField(primary_key=True, db_column='PersonalPageUserUUID', verbose_name='用户UUID')
+    PersonalPageName = models.CharField(max_length=256, unique=True, db_column='PersonalPageName', verbose_name='主页名称')
+    Subtitle = models.CharField(max_length=256, default='', db_column='Subtitle', verbose_name='副标题')
+    BackgroundLink = models.CharField(max_length=256, default='', db_column='BackgroundLink', verbose_name='背景链接')
+    Classification = models.CharField(max_length=256, default='', db_column='Classification', verbose_name='分类')
+    Github = models.CharField(max_length=256, default='', db_column='Github', verbose_name='GitHub')
+    Wechat = models.CharField(max_length=256, default='', db_column='Wechat', verbose_name='微信')
+    QQ = models.CharField(max_length=256, default='', db_column='QQ', verbose_name='QQ')
+    SelfIntroduction = models.TextField(default='', db_column='SelfIntroduction', verbose_name='自我介绍')
+    ProjectExperience = models.CharField(max_length=256, default='', db_column='ProjectExperience', verbose_name='项目经验')
+    SatisfiedCustomers = models.CharField(max_length=256, default='', db_column='SatisfiedCustomers', verbose_name='满意客户')
+    ReceiveAward = models.CharField(max_length=256, default='', db_column='ReceiveAward', verbose_name='获奖')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'PersonalPage'
+        verbose_name = '个人主页'
+        verbose_name_plural = '个人主页'
+
+
+class UserSettings(QModel):
+    """用户设置表——存储每位用户的个性化系统设置（映射 SAAS 主库 UserSettings 表）"""
+
+    UserUUID = UUIDField(primary_key=True, db_column='UserUUID', verbose_name='用户UUID')
+    SettingsData = models.TextField(default='', db_column='SettingsData', verbose_name='设置数据')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'UserSettings'
+        verbose_name = '用户设置'
+        verbose_name_plural = '用户设置'
+
+
 # === 角色表 ===
 
 class Role(QModel):
@@ -900,3 +991,62 @@ class Position(QModel):
         return self.PositionName
 
 # （UserDept 表已废弃——员工部门归属已迁移到 UserRoleDepartment 关联表，不再用独立表）
+
+
+# === 菜单表 ===
+
+class Menu(QModel):
+    """菜单表——系统导航与功能入口（映射 SAAS 主库 Menu 表）"""
+
+    MenuUUID = UUIDField(primary_key=True, db_column='MenuUUID', verbose_name='菜单UUID')
+    CompanyUUID = UUIDField(null=True, blank=True, db_column='CompanyUUID', verbose_name='公司UUID')
+    ParentMenuUUID = UUIDField(null=True, blank=True, db_column='ParentMenuUUID', verbose_name='上级菜单UUID')
+    MenuName = models.CharField(max_length=128, db_column='MenuName', verbose_name='菜单名称')
+    MenuTitle = models.CharField(max_length=128, db_column='MenuTitle', verbose_name='菜单标题')
+    MenuIcon = models.CharField(max_length=128, default='', db_column='MenuIcon', verbose_name='菜单图标')
+    MenuLink = models.CharField(max_length=256, default='', db_column='MenuLink', verbose_name='菜单链接')
+    MenuSort = models.SmallIntegerField(default=0, db_column='MenuSort', verbose_name='排序')
+    PermissionLevel = models.FloatField(default=1.0, db_column='PermissionLevel', verbose_name='权限级别')
+    PermissionAttr = models.CharField(max_length=256, default='', db_column='PermissionAttr', verbose_name='权限属性')
+    MenuStatus = models.SmallIntegerField(default=1, db_column='MenuStatus', verbose_name='菜单状态')
+    MenuType = models.SmallIntegerField(default=0, db_column='MenuType', verbose_name='菜单类型')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'Menu'
+        verbose_name = '菜单'
+        verbose_name_plural = '菜单'
+
+    def __str__(self):
+        return self.MenuTitle or self.MenuName
+
+
+# === 工单表 ===
+
+class WorkOrder(QModel):
+    """工单表——任务与问题跟踪（映射 SAAS 主库 WorkOrder 表）"""
+
+    OrderUUID = UUIDField(primary_key=True, db_column='OrderUUID', verbose_name='工单UUID')
+    Title = models.CharField(max_length=256, db_column='Title', verbose_name='标题')
+    Description = models.CharField(max_length=4096, default='', db_column='Description', verbose_name='描述')
+    Category = models.CharField(max_length=64, default='other', db_column='Category', verbose_name='分类')
+    Priority = models.SmallIntegerField(default=0, db_column='Priority', verbose_name='优先级')
+    Status = models.SmallIntegerField(default=0, db_column='Status', verbose_name='状态')
+    CreatorUUID = UUIDField(db_column='CreatorUUID', db_index=True, verbose_name='创建人UUID')
+    AssigneeUUID = UUIDField(null=True, blank=True, db_column='AssigneeUUID', verbose_name='指派人UUID')
+    Resolution = models.CharField(max_length=4096, default='', db_column='Resolution', verbose_name='解决方案')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+    UpdateTime = models.DateTimeField(null=True, blank=True, db_column='UpdateTime', verbose_name='更新时间')
+    CloseTime = models.DateTimeField(null=True, blank=True, db_column='CloseTime', verbose_name='关闭时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'WorkOrder'
+        ordering = ['-CreateTime']
+        verbose_name = '工单'
+        verbose_name_plural = '工单'
+
+    def __str__(self):
+        return self.Title

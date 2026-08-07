@@ -1,7 +1,8 @@
 import uuid
+from django.db.models import Q
 from django.utils import timezone as _timezone
 
-from gvsdsdk.models import Role, UserRole, RolePermission, Permission, Position, PositionTemplate, PositionTemplatePermission, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, UserRoleDepartment
+from gvsdsdk.models import Role, UserRole, RolePermission, Permission, Position, PositionTemplate, PositionTemplatePermission, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, UserRoleDepartment, Message, Menu, WorkOrder
 from gvsdsdk.auth.crypto import HashPassword, VerifyPassword
 from gvsdsdk.model_utils import _GetUserModel, UUIDObj
 
@@ -112,6 +113,21 @@ class RoleManager:
         User = _GetUserModel()
         user_uuids = UserRole.objects.filter(RoleUUID=RoleUUID).values_list('UserUUID', flat=True)
         return User.objects.filter(UserUUID__in=user_uuids)
+
+    @staticmethod
+    def GetCompanyUserUUIDs(CompanyUUID):
+        """获取公司下所有用户 UUID（通过 UserRole 关联，去重）
+
+        Args:
+            CompanyUUID: 公司 UUID（bytes/str/UUIDObj 均可）
+
+        Returns:
+            set[bytes]：公司关联用户 UUID 集合
+        """
+        return set(
+            UserRole.objects.filter(CompanyUUID=UUIDObj(CompanyUUID).bytes)
+            .values_list('UserUUID', flat=True)
+        )
 
     @staticmethod
     def AssignPermission(RoleUUID, PermUUID, CompanyUUID):
@@ -742,6 +758,15 @@ class AuthManager:
         return User.objects.filter(UserUUID=UUIDObj(UserUUID).bytes).first()
 
     @staticmethod
+    def CountUsers(UserUUIDs=None):
+        """统计用户数量（可按 UUID 集合过滤；空集合返回 0）"""
+        User = _GetUserModel()
+        qs = User.objects.all()
+        if UserUUIDs is not None:
+            qs = qs.filter(UserUUID__in=UserUUIDs) if UserUUIDs else qs.none()
+        return qs.count()
+
+    @staticmethod
     def IsUserNameTaken(UserName):
         """用户名是否已被占用"""
         if not UserName:
@@ -1254,4 +1279,495 @@ class DepartmentManager:
             UserRoleUUID__in=list(ur_uuids),
         ).values_list('DeptUUID', flat=True)
         return Department.objects.filter(DeptUUID__in=list(dept_uuids)).distinct()
+
+
+class MessageManager:
+    """站内信管理器——系统通知与站内信的收发与查询"""
+
+    @staticmethod
+    def _SenderName(SenderUUID):
+        """解析发送者用户名（发送者为空视为系统）"""
+        if not SenderUUID:
+            return '系统'
+        User = _GetUserModel()
+        try:
+            sender = User.objects.filter(UserUUID=UUIDObj(SenderUUID).bytes).first()
+            return sender.UserName if sender else '系统'
+        except Exception:
+            return '系统'
+
+    @staticmethod
+    def _ToDict(msg, SenderName, PreviewOnly=False):
+        return {
+            'MessageUUID': str(msg.MessageUUID) if msg.MessageUUID else '',
+            'Title': msg.Title or '',
+            'Content': (msg.Content or '')[:100] if PreviewOnly else (msg.Content or ''),
+            'MsgType': msg.MsgType or 0,
+            'IsRead': msg.IsRead or 0,
+            'SenderName': SenderName,
+            'RelatedUUID': msg.RelatedUUID or '',
+            'RelatedType': msg.RelatedType or '',
+            'CreateTime': msg.CreateTime.strftime('%Y-%m-%d %H:%M:%S') if msg.CreateTime else '',
+        }
+
+    @staticmethod
+    def UnreadCount(UserUUID):
+        """获取用户未读消息数"""
+        return Message.objects.filter(ReceiverUUID=UUIDObj(UserUUID).bytes, IsRead=0).count()
+
+    @staticmethod
+    def RecentMessages(UserUUID, Limit=5):
+        """获取最近消息（含发送者名，最多 Limit 条）"""
+        qs = Message.objects.filter(
+            ReceiverUUID=UUIDObj(UserUUID).bytes,
+        ).order_by('-CreateTime')[:Limit]
+        return [MessageManager._ToDict(m, MessageManager._SenderName(m.SenderUUID), PreviewOnly=True) for m in qs]
+
+    @staticmethod
+    def ListMessages(UserUUID, Page=1, PageSize=20, IsRead=None, MsgType=None):
+        """分页列出用户消息（可按已读/类型过滤）
+
+        Returns:
+            (total, list[dict])
+        """
+        qs = Message.objects.filter(ReceiverUUID=UUIDObj(UserUUID).bytes)
+        if IsRead in (0, 1):
+            qs = qs.filter(IsRead=IsRead)
+        if MsgType is not None:
+            qs = qs.filter(MsgType=MsgType)
+        total = qs.count()
+        items = qs.order_by('-CreateTime')[(Page - 1) * PageSize:Page * PageSize]
+        return total, [MessageManager._ToDict(m, MessageManager._SenderName(m.SenderUUID)) for m in items]
+
+    @staticmethod
+    def GetMessageDetail(UserUUID, MessageUUID):
+        """获取消息详情并标记已读（不存在返回 None）"""
+        msg = Message.objects.filter(
+            MessageUUID=UUIDObj(MessageUUID).bytes,
+            ReceiverUUID=UUIDObj(UserUUID).bytes,
+        ).first()
+        if msg is None:
+            return None
+        if msg.IsRead != 1:
+            msg.IsRead = 1
+            msg.save(update_fields=['IsRead'])
+        return MessageManager._ToDict(msg, MessageManager._SenderName(msg.SenderUUID))
+
+    @staticmethod
+    def SendMessage(SenderUserUUID, ReceiverUserUUID, Title, Content='',
+                    MsgType=0, RelatedUUID='', RelatedType=''):
+        """发送单条站内信；接收者不存在返回 None"""
+        User = _GetUserModel()
+        try:
+            receiver_bytes = UUIDObj(ReceiverUserUUID).bytes
+        except Exception:
+            receiver_bytes = ReceiverUserUUID
+        if not User.objects.filter(UserUUID=receiver_bytes).exists():
+            return None
+        sender_bytes = UUIDObj(SenderUserUUID).bytes if SenderUserUUID else None
+        msg = Message.objects.create(
+            MessageUUID=uuid.uuid4().bytes,
+            SenderUUID=sender_bytes,
+            ReceiverUUID=receiver_bytes,
+            Title=Title,
+            Content=Content,
+            MsgType=MsgType,
+            IsRead=0,
+            RelatedUUID=RelatedUUID,
+            RelatedType=RelatedType,
+        )
+        return msg
+
+    @staticmethod
+    def SendRoleMessage(SenderUserUUID, RoleUUID, Title, Content='',
+                        MsgType=0, RelatedUUID='', RelatedType=''):
+        """按角色群发站内信（每个持该角色的用户一条）；角色不存在返回 -1
+
+        Returns:
+            发送条数
+        """
+        role = RoleManager.GetRoleByUUID(RoleUUID)
+        if role is None:
+            return -1
+        receivers = RoleManager.GetUsersForRole(role.RoleUUID)
+        count = 0
+        for receiver in receivers:
+            msg = MessageManager.SendMessage(
+                SenderUserUUID, receiver.UserUUID, Title, Content,
+                MsgType, RelatedUUID, RelatedType,
+            )
+            if msg is not None:
+                count += 1
+        return count
+
+    @staticmethod
+    def MarkAllRead(UserUUID):
+        """全部标记已读；返回更新条数"""
+        return Message.objects.filter(
+            ReceiverUUID=UUIDObj(UserUUID).bytes, IsRead=0,
+        ).update(IsRead=1)
+
+    @staticmethod
+    def MarkRead(UserUUID, MessageUUID):
+        """单条标记已读；返回是否命中"""
+        updated = Message.objects.filter(
+            MessageUUID=UUIDObj(MessageUUID).bytes,
+            ReceiverUUID=UUIDObj(UserUUID).bytes,
+            IsRead=0,
+        ).update(IsRead=1)
+        return updated > 0
+
+    @staticmethod
+    def DeleteMessage(UserUUID, MessageUUID):
+        """删除消息；返回是否命中"""
+        deleted, _ = Message.objects.filter(
+            MessageUUID=UUIDObj(MessageUUID).bytes,
+            ReceiverUUID=UUIDObj(UserUUID).bytes,
+        ).delete()
+        return deleted > 0
+
+    @staticmethod
+    def SearchRecipients(Keyword='', Limit=10):
+        """搜索收件人（用户 + 角色）
+
+        Returns:
+            list[dict]：{type: user|role, uuid, name, label}
+        """
+        data = []
+        User = _GetUserModel()
+        uqs = User.objects.all()
+        if Keyword:
+            uqs = uqs.filter(UserName__icontains=Keyword)
+        for u in uqs[:Limit]:
+            uuid_str = UUIDObj(u.UserUUID).str if u.UserUUID else ''
+            data.append({'type': 'user', 'uuid': uuid_str, 'name': u.UserName, 'label': u.UserName})
+        rqs = Role.objects.all()
+        if Keyword:
+            rqs = rqs.filter(RoleName__icontains=Keyword)
+        for r in rqs[:Limit]:
+            uuid_str = UUIDObj(r.RoleUUID).str if r.RoleUUID else ''
+            data.append({'type': 'role', 'uuid': uuid_str, 'name': r.RoleName, 'label': r.RoleName})
+        return data
+
+
+class MenuManager:
+    """菜单管理器——菜单查询、保存与递归删除"""
+
+    @staticmethod
+    def _ToFlat(menu):
+        """Menu 实例 → 扁平 dict（键兼容 GERP 前端菜单协议）"""
+        return {
+            'Id': menu.MenuName,
+            'Title': menu.MenuTitle,
+            'Icon': menu.MenuIcon or '',
+            'Page': menu.MenuLink or '',
+            'ParentUUID': UUIDObj(menu.ParentMenuUUID).str if menu.ParentMenuUUID else '',
+            'MenuUUID': UUIDObj(menu.MenuUUID).str if menu.MenuUUID else '',
+            'CompanyUUID': UUIDObj(menu.CompanyUUID).str if menu.CompanyUUID else '',
+            'Sort': menu.MenuSort or 0,
+            'Type': menu.MenuType or 0,
+            'Children': [],
+            'PermLevel': menu.PermissionLevel or 0,
+            'PermAttr': menu.PermissionAttr or '',
+        }
+
+    @staticmethod
+    def ListVisible(CompanyUUID=None):
+        """用户可见菜单（启用状态 + 公司过滤，按 MenuSort/MenuName 排序）
+
+        Args:
+            CompanyUUID: 公司 UUID（bytes/str 均可）；传 None 时仅返回公有菜单
+
+        Returns:
+            list[dict]：扁平菜单记录列表
+        """
+        qs = Menu.objects.filter(MenuStatus=1)
+        if CompanyUUID:
+            qs = qs.filter(Q(CompanyUUID__isnull=True) | Q(CompanyUUID=CompanyUUID))
+        else:
+            qs = qs.filter(CompanyUUID__isnull=True)
+        qs = qs.order_by('MenuSort', 'MenuName')
+        return [MenuManager._ToFlat(m) for m in qs]
+
+    @staticmethod
+    def _ToAdminFlat(menu):
+        """Menu 实例 → 管理列表 dict（键与 GERP 菜单管理协议一致）"""
+        return {
+            'MenuUUID': UUIDObj(menu.MenuUUID).str if menu.MenuUUID else '',
+            'ParentMenuUUID': UUIDObj(menu.ParentMenuUUID).str if menu.ParentMenuUUID else '',
+            'CompanyUUID': UUIDObj(menu.CompanyUUID).str if menu.CompanyUUID else '',
+            'MenuName': menu.MenuName or '',
+            'MenuTitle': menu.MenuTitle or '',
+            'MenuIcon': menu.MenuIcon or '',
+            'MenuLink': menu.MenuLink or '',
+            'MenuSort': menu.MenuSort if menu.MenuSort is not None else 0,
+            'MenuType': menu.MenuType if menu.MenuType is not None else 0,
+            'MenuStatus': menu.MenuStatus if menu.MenuStatus is not None else 0,
+            'PermissionLevel': menu.PermissionLevel if menu.PermissionLevel is not None else 0,
+            'PermissionAttr': menu.PermissionAttr or '',
+        }
+
+    @staticmethod
+    def AdminList(CompanyUUID=None, CompanyProvided=False):
+        """菜单管理列表
+
+        Args:
+            CompanyUUID: 公司 UUID（bytes/str 均可）
+            CompanyProvided: 是否显式提供了 CompanyUUID 参数
+                （True 且 CompanyUUID 为空 → 仅返回公有菜单；False → 返回全部）
+
+        Returns:
+            list[dict]（键为菜单管理协议）
+        """
+        qs = Menu.objects.all()
+        if CompanyProvided:
+            if CompanyUUID:
+                qs = qs.filter(Q(CompanyUUID__isnull=True) | Q(CompanyUUID=CompanyUUID))
+            else:
+                qs = qs.filter(CompanyUUID__isnull=True)
+        qs = qs.order_by('MenuSort', 'MenuName')
+        return [MenuManager._ToAdminFlat(m) for m in qs]
+
+    @staticmethod
+    def Get(MenuUUID):
+        """按 UUID 查询菜单（不存在返回 None）"""
+        try:
+            return Menu.objects.get(MenuUUID=UUIDObj(MenuUUID).bytes)
+        except (Menu.DoesNotExist, ValueError, AttributeError):
+            return None
+
+    @staticmethod
+    def Save(Data):
+        """新增或修改菜单（有 MenuUUID 则修改）
+
+        Args:
+            Data: dict，键与前端协议一致（MenuUUID 可选）
+
+        Returns:
+            (record_dict, err)：err 非 None 表示失败（如格式无效/不存在）
+        """
+        menu_uuid_str = (Data.get('MenuUUID') or '').strip()
+        company_uuid_str = (Data.get('CompanyUUID') or '').strip()
+        parent_uuid_str = (Data.get('ParentMenuUUID') or '').strip()
+
+        # 解析公司（空则不关联公司，即公有菜单）
+        company_bytes = None
+        if company_uuid_str:
+            try:
+                company_bytes = UUIDObj(company_uuid_str).bytes
+            except Exception:
+                return None, 'CompanyUUID 格式无效'
+            if not Company.objects.filter(CompanyUUID=company_bytes).exists():
+                return None, '公司不存在'
+
+        # 解析父菜单（空则根菜单）
+        parent_bytes = None
+        if parent_uuid_str:
+            try:
+                parent_bytes = UUIDObj(parent_uuid_str).bytes
+            except Exception:
+                return None, 'ParentMenuUUID 格式无效'
+            if not Menu.objects.filter(MenuUUID=parent_bytes).exists():
+                return None, '父菜单不存在'
+
+        # 通用字段
+        menu_name = (Data.get('MenuName') or '').strip()
+        menu_title = (Data.get('MenuTitle') or '').strip()
+        menu_icon = Data.get('MenuIcon') or ''
+        menu_link = Data.get('MenuLink') or ''
+        try:
+            menu_sort = int(Data.get('MenuSort', '0'))
+        except (ValueError, TypeError):
+            menu_sort = 0
+        try:
+            menu_type = int(Data.get('MenuType', '0'))
+        except (ValueError, TypeError):
+            menu_type = 0
+        try:
+            menu_status = int(Data.get('MenuStatus', '1'))
+        except (ValueError, TypeError):
+            menu_status = 1
+        try:
+            perm_level = float(Data.get('PermissionLevel', '1.0'))
+        except (ValueError, TypeError):
+            perm_level = 1.0
+        perm_attr = Data.get('PermissionAttr') or ''
+
+        if menu_uuid_str:
+            # 修改
+            try:
+                menu_uuid = UUIDObj(menu_uuid_str).bytes
+            except Exception:
+                return None, 'MenuUUID 格式无效'
+            menu = Menu.objects.filter(MenuUUID=menu_uuid).first()
+            if menu is None:
+                return None, '菜单不存在'
+            menu.CompanyUUID = company_bytes
+            menu.ParentMenuUUID = parent_bytes
+            menu.MenuName = menu_name
+            menu.MenuTitle = menu_title
+            menu.MenuIcon = menu_icon
+            menu.MenuLink = menu_link
+            menu.MenuSort = menu_sort
+            menu.MenuType = menu_type
+            menu.MenuStatus = menu_status
+            menu.PermissionLevel = perm_level
+            menu.PermissionAttr = perm_attr
+            menu.save()
+            return MenuManager._ToFlat(menu), None
+
+        # 新增
+        menu = Menu.objects.create(
+            MenuUUID=uuid.uuid4().bytes,
+            CompanyUUID=company_bytes,
+            ParentMenuUUID=parent_bytes,
+            MenuName=menu_name or 'new-menu',
+            MenuTitle=menu_title or '新菜单',
+            MenuIcon=menu_icon,
+            MenuLink=menu_link,
+            MenuSort=menu_sort,
+            MenuType=menu_type,
+            MenuStatus=menu_status,
+            PermissionLevel=perm_level,
+            PermissionAttr=perm_attr,
+        )
+        return MenuManager._ToFlat(menu), None
+
+    @staticmethod
+    def Delete(MenuUUID):
+        """递归删除菜单及其子孙节点
+
+        Args:
+            MenuUUID: 菜单 UUID（bytes/str 均可）
+
+        Returns:
+            (成功?, 错误消息 or None)
+        """
+        try:
+            menu_uuid = UUIDObj(MenuUUID).bytes
+        except Exception:
+            return False, 'MenuUUID 格式无效'
+        menu = Menu.objects.filter(MenuUUID=menu_uuid).first()
+        if menu is None:
+            return False, '菜单不存在'
+
+        def _DeleteDescendants(parent_uuid):
+            for child in Menu.objects.filter(ParentMenuUUID=parent_uuid):
+                _DeleteDescendants(child.MenuUUID)
+                child.delete()
+
+        _DeleteDescendants(menu.MenuUUID)
+        menu.delete()
+        return True, None
+
+
+class WorkOrderManager:
+    """工单管理器——工单查询、统计、创建与更新"""
+
+    @staticmethod
+    def _ToFlat(wo):
+        """WorkOrder 实例 → dict（字段与 WorkOrderSerializer 输出一致）"""
+        return {
+            'OrderUUID': UUIDObj(wo.OrderUUID).str if wo.OrderUUID else '',
+            'Title': wo.Title or '',
+            'Description': wo.Description or '',
+            'Category': wo.Category or '',
+            'Priority': wo.Priority or 0,
+            'Status': wo.Status or 0,
+            'CreatorUUID': UUIDObj(wo.CreatorUUID).str if wo.CreatorUUID else '',
+            'AssigneeUUID': UUIDObj(wo.AssigneeUUID).str if wo.AssigneeUUID else '',
+            'Resolution': wo.Resolution or '',
+            'CreateTime': wo.CreateTime.strftime('%Y-%m-%d %H:%M:%S') if wo.CreateTime else '',
+            'UpdateTime': wo.UpdateTime.strftime('%Y-%m-%d %H:%M:%S') if wo.UpdateTime else '',
+            'CloseTime': wo.CloseTime.strftime('%Y-%m-%d %H:%M:%S') if wo.CloseTime else '',
+        }
+
+    @staticmethod
+    def GetStats():
+        """工单统计——按状态/优先级/分类计数
+
+        Returns:
+            dict: {total, byStatus, byPriority, byCategory}
+        """
+        from django.db.models import Count
+        qs = WorkOrder.objects.all()
+
+        def _group(field_name):
+            return {row[field_name]: row['c'] for row in qs.values(field_name).annotate(c=Count('pk'))}
+
+        return {
+            'total': qs.count(),
+            'byStatus': _group('Status'),
+            'byPriority': _group('Priority'),
+            'byCategory': _group('Category'),
+        }
+
+    @staticmethod
+    def ListForUser(UserUUID):
+        """获取用户创建的工单列表（按创建时间倒序）"""
+        return [
+            WorkOrderManager._ToFlat(wo)
+            for wo in WorkOrder.objects.filter(CreatorUUID=UUIDObj(UserUUID).bytes)
+        ]
+
+    @staticmethod
+    def Create(CreatorUUID, Title, Description='', Category='other',
+               Priority=0, AssigneeUUID=None):
+        """创建工单
+
+        Returns:
+            dict：新工单记录
+        """
+        assignee_bytes = None
+        if AssigneeUUID:
+            try:
+                assignee_bytes = UUIDObj(AssigneeUUID).bytes
+            except Exception:
+                assignee_bytes = None
+        wo = WorkOrder.objects.create(
+            OrderUUID=uuid.uuid4().bytes,
+            Title=Title,
+            Description=Description,
+            Category=Category,
+            Priority=Priority,
+            Status=0,
+            CreatorUUID=UUIDObj(CreatorUUID).bytes,
+            AssigneeUUID=assignee_bytes,
+        )
+        return WorkOrderManager._ToFlat(wo)
+
+    @staticmethod
+    def Get(OrderUUID):
+        """按 UUID 查询工单（不存在返回 None）"""
+        try:
+            return WorkOrder.objects.get(OrderUUID=UUIDObj(OrderUUID).bytes)
+        except (WorkOrder.DoesNotExist, ValueError, AttributeError):
+            return None
+
+    @staticmethod
+    def Update(OrderUUID, Data):
+        """更新工单（Status/AssigneeUUID/Resolution/Description/Priority，自动刷新 UpdateTime）
+
+        Args:
+            Data: 变更字段 dict（键同模型字段名）
+
+        Returns:
+            dict：更新后的工单记录；工单不存在返回 None
+        """
+        wo = WorkOrderManager.Get(OrderUUID)
+        if wo is None:
+            return None
+        field_map = {
+            'Status': 'Status',
+            'AssigneeUUID': 'AssigneeUUID',
+            'Resolution': 'Resolution',
+            'Description': 'Description',
+            'Priority': 'Priority',
+        }
+        for key in field_map:
+            if key in Data:
+                setattr(wo, field_map[key], Data[key])
+        wo.UpdateTime = _timezone.now()
+        wo.save()
+        return WorkOrderManager._ToFlat(wo)
 

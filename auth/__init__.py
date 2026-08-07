@@ -6,7 +6,7 @@ __all__ = [
     'IsAdminUser', 'IsCompanyMember', 'CompanyScopedMixin', 'TenantScopedMixin', 'UserScopedMixin', 'PermissionVerifier',
     'IsAdminScopeDisabled', 'IsTenantScopeDisabled',
     'IsAdmin', 'IsSuperAdmin', 'IsTenantAdmin',
-    'RoleManager', 'ShopManager', 'PositionManager', 'AuthManager', 'AdminUserManager', 'TenantManager', 'CompanyManager', 'DepartmentManager', 'UserService',
+    'RoleManager', 'ShopManager', 'PositionManager', 'AuthManager', 'AdminUserManager', 'TenantManager', 'CompanyManager', 'DepartmentManager', 'MessageManager', 'UserService',
 ]
 
 

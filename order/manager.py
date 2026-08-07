@@ -28,6 +28,7 @@ SAAS 级订单编排器——子服务通过此管理器操作订单生命周期
 """
 import uuid as _uuid
 import logging
+import datetime
 from decimal import Decimal
 from typing import Optional, List
 
@@ -118,6 +119,44 @@ class OrderManager:
         start = (page - 1) * page_size
         records = list(qs[start:start + page_size])
         return {'records': records, 'total': total, 'page': page, 'page_size': page_size}
+
+    @staticmethod
+    def GetStats(tenant_uuid=None, company_uuid=None, buyer_user_uuids=None):
+        """仪表盘订单统计——按租户/公司/买家多维度计数
+
+        Args:
+            tenant_uuid: 租户 UUID（None 不限制）
+            company_uuid: 公司 UUID（None 不限制）
+            buyer_user_uuids: 买家 UUID 集合（None 不限制；空集合返回全 0）
+
+        Returns:
+            dict: TotalOrders/TodayOrders/WeekOrders/PendingOrders/
+                  PaidOrders/CompletedOrders
+        """
+        now = _timezone.now()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = today_start - datetime.timedelta(days=today_start.weekday())
+
+        qs = Order.objects.all()
+        if tenant_uuid:
+            qs = qs.filter(TenantUUID=tenant_uuid)
+        if company_uuid:
+            qs = qs.filter(CompanyUUID=company_uuid)
+        if buyer_user_uuids is not None:
+            buyer_bytes = [OrderManager._to_bytes(u) for u in buyer_user_uuids]
+            buyer_bytes = [b for b in buyer_bytes if b]
+            qs = qs.filter(BuyerUserUUID__in=buyer_bytes) if buyer_bytes else qs.none()
+
+        return {
+            'TotalOrders': qs.count(),
+            'TodayOrders': qs.filter(CreateTime__gte=today_start).count(),
+            'WeekOrders': qs.filter(CreateTime__gte=week_start).count(),
+            'PendingOrders': qs.filter(OrderStatus=Order.ORD_PENDING).count(),
+            'PaidOrders': qs.filter(
+                OrderStatus__in=[Order.ORD_PAID, Order.ORD_PROCESSING, Order.ORD_COMPLETED]
+            ).count(),
+            'CompletedOrders': qs.filter(OrderStatus=Order.ORD_COMPLETED).count(),
+        }
 
     def GetOrderItems(self, order_uuid):
         """获取订单行项目列表"""

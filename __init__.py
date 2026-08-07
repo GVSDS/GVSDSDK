@@ -224,6 +224,7 @@ _LAZY_SYMBOLS = {
     'TenantManager': ('auth', 'TenantManager'),
     'CompanyManager': ('auth', 'CompanyManager'),
     'DepartmentManager': ('auth', 'DepartmentManager'),
+    'MessageManager': ('auth', 'MessageManager'),
     'UserService': ('auth', 'UserService'),
 
     # ── 分佣引擎 ──────────────────────────────────────────
@@ -298,6 +299,8 @@ _LAZY_SYMBOLS = {
     'Position': ('models', 'Position'),
     'PositionTemplate': ('models', 'PositionTemplate'),
     'PositionTemplatePermission': ('models', 'PositionTemplatePermission'),
+    'Menu': ('models', 'Menu'),
+    'WorkOrder': ('models', 'WorkOrder'),
     'FixedBinaryField': ('models', 'FixedBinaryField'),
     'QModel': ('model_base', 'QModel'),
     'QModelBase': ('model_base', 'QModelBase'),
