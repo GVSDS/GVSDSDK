@@ -469,7 +469,8 @@ class TransactionTimeoutCheckView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        timed_out = TransactionManager.CheckTimeouts()
+        token = getattr(request.user, 'service_token', None)
+        timed_out = TransactionManager.CheckTimeouts(access_token=token)
         return Response(_ok({'TimedOut': timed_out, 'Count': len(timed_out)}))
 
 

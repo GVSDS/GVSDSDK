@@ -351,11 +351,25 @@ class TransactionManager:
     @staticmethod
     @db_transaction.atomic
     def RetryStep(transaction_code, step_index, access_token=None):
-        """重试失败步骤（行锁防并发）"""
+        """重试失败步骤（行锁防并发）
+
+        仅允许事务处于 FAILED/RUNNING 且步骤为正向失败（无
+        compensate_error）时重试；手动重试不占用自动重试的
+        MaxRetries 配额（计数分离），重试时重建前置步骤数据流，
+        避免载荷漂移与幂等误命中。
+        """
         try:
             dtx = DistributedTransaction.objects.select_for_update().get(TransactionCode=transaction_code)
         except DistributedTransaction.DoesNotExist:
             raise TransactionError(f'事务不存在: {transaction_code}')
+
+        if dtx.TransactionStatus not in (
+            DistributedTransaction.TX_STATUS_FAILED,
+            DistributedTransaction.TX_STATUS_RUNNING,
+        ):
+            raise TransactionError(
+                f'事务状态不允许重试步骤: {dtx.get_TransactionStatus_display()}'
+            )
 
         try:
             step = dtx.steps.get(StepIndex=step_index)
@@ -368,15 +382,29 @@ class TransactionManager:
         ):
             raise TransactionError(f'步骤状态不允许重试: {step.get_StepStatus_display()}')
 
-        if not step.CanRetry:
-            raise TransactionError(f'步骤已达到最大重试次数: {step.MaxRetries}')
+        if 'compensate_error' in (step.StepResult or {}):
+            raise TransactionError('该步骤为补偿失败，请使用 RetryCompensate 重试补偿')
 
+        # 手动重试不受自动重试 MaxRetries 配额限制（计数分离）；
+        # 递增 RetryCount 使幂等键随重试变化，避免命中旧失败缓存
         step.RetryCount += 1
         step.StepStatus = TransactionStep.STEP_STATUS_PENDING
         step.save(update_fields=['RetryCount', 'StepStatus'])
 
+        # 重建步骤数据流：汇总本步骤之前所有已完成步骤的结果
+        flow_payload = {}
+        for s in dtx.steps.all().order_by('StepIndex'):
+            if s.StepIndex >= step.StepIndex:
+                break
+            if s.StepStatus == TransactionStep.STEP_STATUS_COMPLETED and isinstance(s.StepResult, dict):
+                flow_payload.update(s.StepResult)
+
         try:
-            result = TransactionManager._execute_step(step, access_token=access_token)
+            result = TransactionManager._execute_step(
+                step,
+                access_token=access_token,
+                extra_payload=flow_payload or None,
+            )
             step.StepStatus = TransactionStep.STEP_STATUS_COMPLETED
             step.StepResult = result
             step.EndTime = _utcnow()
@@ -538,8 +566,29 @@ class TransactionManager:
         return dtx
 
     @staticmethod
-    def CheckTimeouts():
-        """检测所有超时事务并触发补偿"""
+    def _PickCompensateToken():
+        """选取一条有效服务令牌用于超时补偿回调
+
+        子服务器 local 端点仅远程自省令牌有效性（不校验归属），
+        故任一条未过期且未撤销的令牌即可满足补偿回调认证。
+        """
+        from gvsdsdk.msync.models import ServiceToken
+        return (
+            ServiceToken.objects
+            .filter(TokenStatus=1, ExpiresAt__gt=_utcnow())
+            .order_by('-CreateTime')
+            .values_list('AccessToken', flat=True)
+            .first()
+        )
+
+    @staticmethod
+    def CheckTimeouts(access_token=None):
+        """检测所有超时事务并触发补偿
+
+        Args:
+            access_token: 调用方服务令牌；未提供时自动选取一条有效
+                令牌用于补偿回调，避免无令牌补偿被工作服务 401 拒绝。
+        """
         timed_out = []
         running_txs = DistributedTransaction.objects.filter(
             TransactionStatus__in=(
@@ -548,11 +597,17 @@ class TransactionManager:
             ),
         )
 
+        if not access_token:
+            access_token = TransactionManager._PickCompensateToken()
+
         for dtx in running_txs:
             if dtx.IsTimedOut:
                 TransactionManager._mark_timed_out(dtx)
                 try:
-                    TransactionManager.Compensate(dtx.TransactionCode)
+                    TransactionManager.Compensate(
+                        dtx.TransactionCode,
+                        access_token=access_token,
+                    )
                 except TransactionError:
                     pass
                 timed_out.append(dtx.TransactionCode)

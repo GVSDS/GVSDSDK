@@ -61,16 +61,16 @@ class ServiceNode(QModel):
 
     def SetSecret(self, raw_secret):
         from gvsdsdk.auth.crypto import SymmetricEncrypt
-        from gvsdsdk.secrets import get as _secret_get
-        master = _secret_get('msync', 'MASTER_SECRET', fallback='gvsds-msync-default-secret')
+        from gvsdsdk.msync.auth import _get_master_secret
+        master = _get_master_secret()
         self.ServiceSecretEncrypted = SymmetricEncrypt(raw_secret, master)
 
     def GetSecret(self):
         if not self.ServiceSecretEncrypted:
             return None
         from gvsdsdk.auth.crypto import SymmetricDecrypt
-        from gvsdsdk.secrets import get as _secret_get
-        master = _secret_get('msync', 'MASTER_SECRET', fallback='gvsds-msync-default-secret')
+        from gvsdsdk.msync.auth import _get_master_secret
+        master = _get_master_secret()
         try:
             return SymmetricDecrypt(self.ServiceSecretEncrypted, master)
         except Exception:
