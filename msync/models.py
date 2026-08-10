@@ -88,6 +88,7 @@ class ServiceToken(QModel):
     TokenUUID = UUIDField(primary_key=True, verbose_name='令牌UUID')
     ServiceUUID = models.ForeignKey(
         ServiceNode, on_delete=models.CASCADE,
+        db_column='ServiceUUID',
         related_name='tokens', verbose_name='服务UUID',
     )
     AccessToken = models.CharField(max_length=512, unique=True, verbose_name='访问令牌')
@@ -128,6 +129,7 @@ class ObjectGlobalMapping(QModel):
     ObjectGlobalID = models.CharField(max_length=128, unique=True, db_index=True, verbose_name='全局ID')
     OwnerServiceUUID = models.ForeignKey(
         ServiceNode, on_delete=models.CASCADE,
+        db_column='OwnerServiceUUID',
         related_name='owned_objects', verbose_name='所属服务UUID',
     )
     ObjectMetadata = models.JSONField(default=dict, verbose_name='对象元数据')
@@ -198,7 +200,8 @@ class DistributedTransaction(QModel):
     )
     InitiatorServiceUUID = models.ForeignKey(
         ServiceNode, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='initiated_dtx', verbose_name='发起服务UUID',
+        null=True, blank=True, db_column='InitiatorServiceUUID',
+        related_name='initiated_dtx', verbose_name='发起服务UUID',
     )
     ReferenceOGMUUID = UUIDField(null=True, blank=True, verbose_name='关联OGM UUID')
     TransactionPayload = models.JSONField(default=dict, verbose_name='事务载荷')
@@ -269,6 +272,7 @@ class TransactionStep(QModel):
     StepUUID = UUIDField(primary_key=True, verbose_name='步骤UUID')
     TransactionUUID = models.ForeignKey(
         DistributedTransaction, on_delete=models.CASCADE,
+        db_column='TransactionUUID',
         related_name='steps', verbose_name='事务UUID',
     )
     StepIndex = models.IntegerField(verbose_name='步骤序号')
@@ -276,7 +280,8 @@ class TransactionStep(QModel):
     StepDescription = models.CharField(max_length=512, default='', verbose_name='步骤描述')
     ParticipantServiceUUID = models.ForeignKey(
         ServiceNode, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='participated_steps', verbose_name='参与服务UUID',
+        null=True, blank=True, db_column='ParticipantServiceUUID',
+        related_name='participated_steps', verbose_name='参与服务UUID',
     )
     StepStatus = models.SmallIntegerField(
         default=STEP_STATUS_PENDING, choices=STEP_STATUS_CHOICES, verbose_name='步骤状态',
