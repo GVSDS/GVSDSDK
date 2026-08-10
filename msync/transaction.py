@@ -302,6 +302,18 @@ class TransactionManager:
         if dtx.TransactionStatus == DistributedTransaction.TX_STATUS_COMPENSATED:
             return dtx
 
+        # 状态守卫：仅 执行中/失败/超时/补偿中 允许补偿；
+        # 待执行（应走 Cancel）与已提交 一律拒绝，避免错误回滚
+        if dtx.TransactionStatus not in (
+            DistributedTransaction.TX_STATUS_RUNNING,
+            DistributedTransaction.TX_STATUS_FAILED,
+            DistributedTransaction.TX_STATUS_TIMED_OUT,
+            DistributedTransaction.TX_STATUS_COMPENSATING,
+        ):
+            raise TransactionError(
+                f'事务状态不允许补偿: {dtx.get_TransactionStatus_display()}'
+            )
+
         dtx.TransactionStatus = DistributedTransaction.TX_STATUS_COMPENSATING
         dtx.UpdateTime = _utcnow()
         dtx.save(update_fields=['TransactionStatus', 'UpdateTime'])

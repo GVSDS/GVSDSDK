@@ -261,17 +261,19 @@ def on_heartbeat(sid, data):
 
 @sio.on('msync:deregister', namespace=NS)
 def on_deregister(sid, data):
-    with _map_lock:
-        service_name = _sid_service_map.pop(sid, None)
-        if service_name:
-            _service_sid_map.pop(service_name, None)
-        auth_name = _sid_auth_map.pop(sid, None)
-    name = _d(data, 'ServiceName') or service_name
+    name = _d(data, 'ServiceName') or ''
     if not name:
         return _err('未指定服务名', 400)
-    # 仅允许注销本服务（防止伪造 ServiceName 注销他人）
+    # 先鉴权（防止伪造 ServiceName 注销他人/污染连接状态），通过后再清映射
+    with _map_lock:
+        auth_name = _sid_auth_map.get(sid)
     if not auth_name or auth_name != name:
         return _err('需要密钥认证', 401)
+    with _map_lock:
+        _sid_service_map.pop(sid, None)
+        if _service_sid_map.get(name) == sid:
+            _service_sid_map.pop(name, None)
+        _sid_auth_map.pop(sid, None)
     from gvsdsdk.msync.registry import ServiceRegistry, RegistryError
     try:
         ServiceRegistry.Deregister(name)

@@ -65,7 +65,18 @@ class AuthTokenView(APIView):
                 scope = []
 
             try:
-                expires_ts = token.ExpiresAt.timestamp()
+                # naive UTC 需先补时区再 timestamp()，避免按本地时区解释偏移
+                if isinstance(token.ExpiresAt, str):
+                    from django.utils.dateparse import parse_datetime
+                    dt = parse_datetime(token.ExpiresAt)
+                    if dt is None:
+                        raise ValueError
+                else:
+                    dt = token.ExpiresAt
+                if dt.tzinfo is None:
+                    import datetime as _dt
+                    dt = dt.replace(tzinfo=_dt.timezone.utc)
+                expires_ts = dt.timestamp()
             except Exception:
                 import time as _time
                 expires_ts = _time.time() + 7200
@@ -104,7 +115,18 @@ class AuthTokenRefreshView(APIView):
                 scope = []
 
             try:
-                expires_ts = token.ExpiresAt.timestamp()
+                # naive UTC 需先补时区再 timestamp()，避免按本地时区解释偏移
+                if isinstance(token.ExpiresAt, str):
+                    from django.utils.dateparse import parse_datetime
+                    dt = parse_datetime(token.ExpiresAt)
+                    if dt is None:
+                        raise ValueError
+                else:
+                    dt = token.ExpiresAt
+                if dt.tzinfo is None:
+                    import datetime as _dt
+                    dt = dt.replace(tzinfo=_dt.timezone.utc)
+                expires_ts = dt.timestamp()
             except Exception:
                 import time as _time
                 expires_ts = _time.time() + 7200
@@ -504,6 +526,7 @@ class LocalExecuteView(APIView):
         result = local_tx.ExecuteStep(
             name=ser.ValidatedData['StepName'],
             payload=ser.ValidatedData.get('Payload'),
+            idempotency_key=request.headers.get('Idempotency-Key'),
         )
 
         if result['success']:
@@ -524,6 +547,7 @@ class LocalCompensateView(APIView):
             name=ser.ValidatedData['StepName'],
             payload=ser.ValidatedData.get('Payload'),
             action_result=ser.ValidatedData.get('ActionResult'),
+            idempotency_key=request.headers.get('Idempotency-Key'),
         )
 
         if result['success']:
@@ -532,6 +556,8 @@ class LocalCompensateView(APIView):
 
 
 class LocalHandlersView(APIView):
+    authentication_classes = [ServiceTokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         handlers = local_tx.ListHandlers()
