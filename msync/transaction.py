@@ -207,9 +207,13 @@ class TransactionManager:
         dtx.save(update_fields=['TransactionStatus', 'UpdateTime'])
 
         steps = list(dtx.steps.all().order_by('StepIndex'))
+        flow_payload = {}
 
         for step in steps:
             if step.StepStatus == TransactionStep.STEP_STATUS_COMPLETED:
+                # 断点续跑：已完成步骤的结果仍参与后续步骤数据流
+                if isinstance(step.StepResult, dict):
+                    flow_payload.update(step.StepResult)
                 continue
 
             if dtx.IsTimedOut:
@@ -221,32 +225,60 @@ class TransactionManager:
                 )
                 raise TransactionError(f'事务执行超时: {transaction_code}')
 
-            try:
-                result = TransactionManager._execute_step(step, access_token=access_token)
-                step.StepStatus = TransactionStep.STEP_STATUS_COMPLETED
-                step.StepResult = result
-                step.EndTime = _utcnow()
-                step.save(update_fields=['StepStatus', 'StepResult', 'EndTime'])
-            except StepExecutionError as e:
-                step.StepStatus = TransactionStep.STEP_STATUS_FAILED
-                step.StepResult = {
-                    'error': str(e),
-                    'status_code': e.StatusCode,
-                    'response': e.ResponseBody,
-                }
-                step.EndTime = _utcnow()
-                step.save(update_fields=['StepStatus', 'StepResult', 'EndTime'])
+            step_succeeded = False
+            while not step_succeeded:
+                try:
+                    result = TransactionManager._execute_step(
+                        step,
+                        access_token=access_token,
+                        extra_payload=flow_payload or None,
+                    )
+                    step.StepStatus = TransactionStep.STEP_STATUS_COMPLETED
+                    step.StepResult = result
+                    step.EndTime = _utcnow()
+                    step.save(update_fields=['StepStatus', 'StepResult', 'EndTime'])
+                    step_succeeded = True
+                except StepExecutionError as e:
+                    if step.CanRetry:
+                        # 自动重试（未达 MaxRetries 上限），与手动 RetryStep 共享 RetryCount
+                        step.RetryCount += 1
+                        step.save(update_fields=['RetryCount'])
+                        logger.warning(
+                            f'事务步骤执行失败，自动重试 {step.RetryCount}/{step.MaxRetries}: '
+                            f'{transaction_code} step={step.StepIndex}: {e}'
+                        )
+                        continue
+                    step.StepStatus = TransactionStep.STEP_STATUS_FAILED
+                    step.StepResult = {
+                        'error': str(e),
+                        'status_code': e.StatusCode,
+                        'response': e.ResponseBody,
+                        'retry_count': step.RetryCount,
+                    }
+                    step.EndTime = _utcnow()
+                    step.save(update_fields=['StepStatus', 'StepResult', 'EndTime'])
+                    break
 
+            if not step_succeeded:
                 logger.warning(f'事务步骤失败: {transaction_code} step={step.StepIndex}, 触发补偿')
                 db_transaction.on_commit(
                     lambda tc=transaction_code, at=access_token: TransactionManager.Compensate(tc, access_token=at)
                 )
                 return DistributedTransaction.objects.get(TransactionCode=transaction_code)
 
+            # 步骤数据流：本步结果合并进后续步骤载荷（仅 dict 结果）
+            if isinstance(step.StepResult, dict):
+                flow_payload.update(step.StepResult)
+
+            # 活动推进刷新空闲超时计时
+            dtx.UpdateTime = _utcnow()
+            dtx.save(update_fields=['UpdateTime'])
+
         dtx.TransactionStatus = DistributedTransaction.TX_STATUS_COMMITTED
         dtx.EndTime = _utcnow()
         dtx.UpdateTime = _utcnow()
-        dtx.save(update_fields=['TransactionStatus', 'EndTime', 'UpdateTime'])
+        dtx.TransactionResult = TransactionManager._BuildStepSummary(dtx)
+        dtx.save(update_fields=['TransactionStatus', 'EndTime', 'UpdateTime', 'TransactionResult'])
 
         logger.info(f'分布式事务提交: {transaction_code}')
         return dtx
@@ -310,16 +342,18 @@ class TransactionManager:
 
         dtx.EndTime = _utcnow()
         dtx.UpdateTime = _utcnow()
-        dtx.save(update_fields=['TransactionStatus', 'EndTime', 'UpdateTime'])
+        dtx.TransactionResult = TransactionManager._BuildStepSummary(dtx)
+        dtx.save(update_fields=['TransactionStatus', 'EndTime', 'UpdateTime', 'TransactionResult'])
 
         logger.info(f'分布式事务补偿完成: {transaction_code} -> {dtx.get_TransactionStatus_display()}')
         return dtx
 
     @staticmethod
+    @db_transaction.atomic
     def RetryStep(transaction_code, step_index, access_token=None):
-        """重试失败步骤"""
+        """重试失败步骤（行锁防并发）"""
         try:
-            dtx = DistributedTransaction.objects.get(TransactionCode=transaction_code)
+            dtx = DistributedTransaction.objects.select_for_update().get(TransactionCode=transaction_code)
         except DistributedTransaction.DoesNotExist:
             raise TransactionError(f'事务不存在: {transaction_code}')
 
@@ -424,7 +458,8 @@ class TransactionManager:
 
         # 补偿成功：若仍存在补偿失败的步骤则事务保持 FAILED，否则 COMPENSATED
         remaining_failed = any(
-            'compensate_error' in (s.StepResult or {})
+            s.StepStatus == TransactionStep.STEP_STATUS_FAILED
+            and 'compensate_error' in (s.StepResult or {})
             for s in dtx.steps.all()
         )
         if remaining_failed:
@@ -555,6 +590,26 @@ class TransactionManager:
         dtx.save(update_fields=['TransactionStatus', 'UpdateTime'])
 
     @staticmethod
+    def _BuildStepSummary(dtx):
+        """构建步骤汇总快照（写入事务 TransactionResult）"""
+        steps = []
+        for s in dtx.steps.all().order_by('StepIndex'):
+            step_result = s.StepResult or {}
+            steps.append({
+                'Index': s.StepIndex,
+                'Name': s.StepName,
+                'Status': s.get_StepStatus_display(),
+                'RetryCount': s.RetryCount,
+                'Error': step_result.get('error'),
+                'CompensateError': step_result.get('compensate_error'),
+            })
+        return {
+            'Status': dtx.get_TransactionStatus_display(),
+            'StatusCode': dtx.TransactionStatus,
+            'Steps': steps,
+        }
+
+    @staticmethod
     def _get_service_domain(step):
         """获取步骤参与服务的域名"""
         if step.ParticipantServiceUUID:
@@ -562,7 +617,7 @@ class TransactionManager:
         return None
 
     @staticmethod
-    def _execute_step(step, access_token=None):
+    def _execute_step(step, access_token=None, extra_payload=None):
         """执行单个步骤——调用参与服务的本地事务管理器 execute 端点"""
         step.StepStatus = TransactionStep.STEP_STATUS_RUNNING
         step.StartTime = _utcnow()
@@ -582,11 +637,15 @@ class TransactionManager:
             'TransactionCode': step.TransactionUUID.TransactionCode,
             'StepIndex': step.StepIndex,
         }
+        if extra_payload:
+            # 步骤间数据流：前置步骤结果合并进本步载荷（不落库，向后兼容）
+            payload['payload'] = {**(step.ActionPayload or {}), **extra_payload}
 
         return TransactionManager._call_service(
             endpoint=endpoint,
             payload=payload,
             access_token=access_token,
+            idempotency_key=f'{step.TransactionUUID.TransactionCode}:{step.StepIndex}:{step.RetryCount}',
         )
 
     @staticmethod
@@ -612,14 +671,18 @@ class TransactionManager:
             endpoint=endpoint,
             payload=payload,
             access_token=access_token,
+            idempotency_key=f'C-{step.TransactionUUID.TransactionCode}:{step.StepIndex}:{step.RetryCount}',
         )
 
     @staticmethod
-    def _call_service(endpoint, payload=None, access_token=None):
+    def _call_service(endpoint, payload=None, access_token=None, idempotency_key=None):
         """调用远程服务的本地事务管理器端点（使用连接池 + TLS 验证）"""
         headers = {'Content-Type': 'application/json'}
         if access_token:
             headers['Authorization'] = f'Service {access_token}'
+        if idempotency_key:
+            # 幂等键：事务码+步骤号+重试次数，工作服务侧可按此去重（崩溃窗口内重复副作用兜底）
+            headers['Idempotency-Key'] = idempotency_key
 
         try:
             resp = _http_session.post(

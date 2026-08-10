@@ -233,11 +233,15 @@ class DistributedTransaction(QModel):
 
     @property
     def IsTimedOut(self):
+        # 空闲超时：以最后活动时间（UpdateTime）起算，未活动过则退回创建时间
         if self.TransactionStatus in (self.TX_STATUS_COMMITTED, self.TX_STATUS_COMPENSATED):
             return False
-        if not self.TimeoutSeconds or not self.CreateTime:
+        if not self.TimeoutSeconds:
             return False
-        elapsed = (_utcnow() - self.CreateTime.replace(tzinfo=None)).total_seconds()
+        baseline = self.UpdateTime or self.CreateTime
+        if not baseline:
+            return False
+        elapsed = (_utcnow() - baseline.replace(tzinfo=None)).total_seconds()
         return elapsed > self.TimeoutSeconds
 
 

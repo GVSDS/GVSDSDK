@@ -1,14 +1,13 @@
 """GVSDS SDK — GVSDS 分布式 SDK
 
 GVSDS 分布式服务间通信 SDK，作为子服务器（如 ATestCServer）和主服务器（gvsds）
-之间的统一通信桥梁。
+之间的统一通信桥梁。实现原生位于 gvsdsdk 内（非封装层），可脱离 gvsds 独立部署。
 
 设计原则：
-    1. 薄封装：直接包装 gvsds.apps.msync 原生层
-    2. 纯转发：方法签名 1:1 对应原生层
+    1. 原生实现：全部逻辑位于 gvsdsdk（含 msync 通信底座），不依赖 gvsds
+    2. 独立部署：屏蔽 gvsds 包后所有子模块可独立导入运行
     3. PascalCase：全部公开 API 使用 PascalCase
-    4. 协议兼容：完全兼容 gvsds/apps/msync 现有协议
-    5. 惰性加载：仅在访问属性时才 import 原生层（避免 Django 未初始化时报错）
+    4. 惰性加载：仅访问属性时才 import ORM 依赖模块（避免 Django 未初始化时报错）
 
 包结构：
     gvsdsdk/
@@ -17,20 +16,24 @@ GVSDS 分布式服务间通信 SDK，作为子服务器（如 ATestCServer）和
     │   ├── middleware.py    # CurrentRoleMiddleware
     │   ├── permissions.py   # RBAC/ABAC 权限
     │   └── managers.py     # RoleManager（UserManager 在 models.py）
-    ├── msync/              # MSYNC 服务间通信
+    ├── msync/              # MSYNC 服务间通信（完整实现）
+    │   ├── models.py       # 服务节点/令牌/OGM/分布式事务模型
+    │   ├── registry.py     # 服务注册发现
+    │   ├── ogm.py          # OGM 对象全局映射
+    │   ├── transaction.py  # Saga 远程事务编排
+    │   ├── local_tx.py     # 本地事务步骤处理器
+    │   ├── auth.py         # HMAC 签名 + 令牌编解码 + 服务端签发/验证
+    │   ├── sio.py          # Socket.IO 服务端
+    │   ├── views.py        # REST API 视图
+    │   └── ...
     ├── commission/         # 分佣引擎
-    │   ├── models.py       # 分佣数据模型
-    │   ├── manager.py      # CommissionEngine 编排器
-    │   └── strategies/     # 分账策略
     ├── payment/            # 支付网关
-    │   ├── models.py       # 支付数据模型
-    │   ├── manager.py      # PaymentManager 编排器
-    │   └── gateways/       # 支付渠道适配器
     ├── order/              # 订单模板与订单
-    │   └── models.py       # 订单数据模型
     ├── models.py           # SAAS 核心数据模型
     ├── model_base.py       # QModel
     ├── model_utils.py      # UUIDObj
+    ├── secrets.py          # secrets.ini 配置读取
+    ├── serializer_base.py  # PascalCase DRF 序列化器基类
     └── fluent.py           # FluentQuery ORM 查询层
 
 使用示例：
@@ -38,7 +41,7 @@ GVSDS 分布式服务间通信 SDK，作为子服务器（如 ATestCServer）和
     from gvsdsdk.auth import PermissionVerifier
     from gvsdsdk.commission import CommissionEngine
     from gvsdsdk.payment import PaymentManager
-    print(gvsdsdk.__version__)  # '1.0.0'
+    print(gvsdsdk.__version__)  # '1.1.0'
 """
 
 import os as _os
@@ -52,7 +55,7 @@ from typing import Optional, Tuple
 #: 主版本号
 VERSION_MAJOR = 1
 #: 次版本号
-VERSION_MINOR = 0
+VERSION_MINOR = 1
 #: 补丁版本号
 VERSION_PATCH = 0
 #: 预发布标签（如 'a1', 'b2', 'rc1'）

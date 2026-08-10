@@ -43,7 +43,7 @@ class Migration(migrations.Migration):
                 ('RefreshExpiresAt', models.DateTimeField(db_column='RefreshExpiresAt')),
                 ('CreateTime', models.DateTimeField(db_column='CreateTime', default=datetime.datetime.utcnow)),
                 ('TokenStatus', models.SmallIntegerField(db_column='TokenStatus', default=1)),
-                ('ServiceUUID', models.ForeignKey(db_column='ServiceUUID', on_delete=django.db.models.deletion.CASCADE, related_name='tokens', to='msync.servicenode')),
+                ('ServiceUUID', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='tokens', to='msync.servicenode')),
             ],
             options={
                 'verbose_name': '服务令牌',
@@ -63,7 +63,7 @@ class Migration(migrations.Migration):
                 ('ObjectStatus', models.SmallIntegerField(db_column='ObjectStatus', default=1)),
                 ('CreateTime', models.DateTimeField(db_column='CreateTime', default=datetime.datetime.utcnow)),
                 ('UpdateTime', models.DateTimeField(blank=True, db_column='UpdateTime', null=True)),
-                ('OwnerServiceUUID', models.ForeignKey(db_column='OwnerServiceUUID', on_delete=django.db.models.deletion.CASCADE, related_name='owned_objects', to='msync.servicenode')),
+                ('OwnerServiceUUID', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='owned_objects', to='msync.servicenode')),
             ],
             options={
                 'verbose_name': '对象全局映射',
@@ -97,7 +97,7 @@ class Migration(migrations.Migration):
                 ('CreateTime', models.DateTimeField(db_column='CreateTime', default=datetime.datetime.utcnow)),
                 ('UpdateTime', models.DateTimeField(blank=True, db_column='UpdateTime', null=True)),
                 ('EndTime', models.DateTimeField(blank=True, db_column='EndTime', null=True)),
-                ('InitiatorServiceUUID', models.ForeignKey(blank=True, db_column='InitiatorServiceUUID', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='initiated_dtx', to='msync.servicenode')),
+                ('InitiatorServiceUUID', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='initiated_dtx', to='msync.servicenode')),
             ],
             options={
                 'verbose_name': '分布式事务',
@@ -134,8 +134,8 @@ class Migration(migrations.Migration):
                 ('CreateTime', models.DateTimeField(db_column='CreateTime', default=datetime.datetime.utcnow)),
                 ('StartTime', models.DateTimeField(blank=True, db_column='StartTime', null=True)),
                 ('EndTime', models.DateTimeField(blank=True, db_column='EndTime', null=True)),
-                ('ParticipantServiceUUID', models.ForeignKey(blank=True, db_column='ParticipantServiceUUID', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='participated_steps', to='msync.servicenode')),
-                ('TransactionUUID', models.ForeignKey(db_column='TransactionUUID', on_delete=django.db.models.deletion.CASCADE, related_name='steps', to='msync.distributedtransaction')),
+                ('ParticipantServiceUUID', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='participated_steps', to='msync.servicenode')),
+                ('TransactionUUID', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='steps', to='msync.distributedtransaction')),
             ],
             options={
                 'verbose_name': '事务步骤',
