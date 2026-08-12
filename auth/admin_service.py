@@ -131,3 +131,25 @@ def IsTenantAdmin(request=None, user=None, role_uuid=None) -> bool:
     用于租户内管理员判定：仅关闭公司隔离，保留租户隔离。
     """
     return _HasPerm(request, user, role_uuid, 'admin:tenant')
+
+
+def IsCompanyAdmin(request=None, user=None, role_uuid=None) -> bool:
+    """判断用户是否为公司管理员（admin:company / admin:tenant / admin:super）
+
+    公司管理员权限键 ``admin:company`` 由管理员在角色权限分配时手动勾选，
+    绑定到具体公司（RolePermission.CompanyUUID 维度）后，仅在该公司内生效。
+
+    继承规则（公司管理员能力）：
+        - admin:super  —— 跨租户管理员，天然具备
+        - admin:tenant —— 租户内管理员，自动继承（可管理租户下所有公司）
+        - admin:company—— 手动授予的角色，需按公司维度绑定
+
+    返回：
+        bool
+    """
+    if _HasPerm(request, user, role_uuid, 'admin:company'):
+        return True
+    # 租户管理员 / 跨租户管理员自动继承公司管理员权限
+    if IsAdmin(request=request, user=user, role_uuid=role_uuid):
+        return True
+    return False

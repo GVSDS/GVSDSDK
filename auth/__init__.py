@@ -5,7 +5,7 @@ __all__ = [
     'CurrentRoleMiddleware',
     'IsAdminUser', 'IsCompanyMember', 'CompanyScopedMixin', 'TenantScopedMixin', 'UserScopedMixin', 'PermissionVerifier',
     'IsAdminScopeDisabled', 'IsTenantScopeDisabled',
-    'IsAdmin', 'IsSuperAdmin', 'IsTenantAdmin',
+    'IsAdmin', 'IsSuperAdmin', 'IsTenantAdmin', 'IsCompanyAdmin',
     'RoleManager', 'ShopManager', 'PositionManager', 'AuthManager', 'AdminUserManager', 'TenantManager', 'CompanyManager', 'DepartmentManager', 'MessageManager', 'UserService',
 ]
 
@@ -25,7 +25,7 @@ def __getattr__(name):
         val = getattr(_m, name)
         globals()[name] = val
         return val
-    if name in ('IsAdmin', 'IsSuperAdmin', 'IsTenantAdmin'):
+    if name in ('IsAdmin', 'IsSuperAdmin', 'IsTenantAdmin', 'IsCompanyAdmin'):
         from gvsdsdk.auth import admin_service as _m
         val = getattr(_m, name)
         globals()[name] = val
