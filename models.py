@@ -796,6 +796,54 @@ class RolePermission(QModel):
         verbose_name_plural = '角色权限关联'
 
 
+# === RAM 资源访问管理表 ===
+
+class RAMGrant(QModel):
+    """RAM 授权表——资源访问管理（Resource Access Management）授权记录
+
+    RAM 是统一"主体→资源→操作"授权模型（借鉴 AWS RAM/IAM）：
+        - 主体 Principal：Role（角色）/ User（用户）
+        - 资源 Resource：App（应用）/ Menu（菜单）/ data_scope（数据权限，预留）
+        - 操作 Action：view（可见）/ use（使用）/ manage（管理）/ grant（授权）
+        - 作用域 Scope：授权只在归属租户/公司内生效（null=全租户/全公司，仅 super 可授）
+
+    与现有权限体系融合：
+        - App 可见性 = 安装状态（AppManager.CheckAccess）∩ RAM(角色→App, view)
+        - 菜单可见性 = 公司过滤 ∧ 权限码校验 ∧ 应用安装 ∧ RAM(角色→Menu, view)（可选启用）
+        - 数据权限暂不接管（RoleScope 四级已实现），预留 ResourceType=data_scope
+    """
+
+    GrantUUID = UUIDField(primary_key=True, db_column='GrantUUID', verbose_name='授权UUID')
+    PrincipalType = models.CharField(max_length=16, db_column='PrincipalType', verbose_name='主体类型(role/user)')
+    PrincipalUUID = UUIDField(db_column='PrincipalUUID', verbose_name='主体UUID(角色/用户)')
+    ResourceType = models.CharField(max_length=32, db_column='ResourceType', verbose_name='资源类型(app/menu/data_scope)')
+    ResourceUUID = UUIDField(db_column='ResourceUUID', verbose_name='资源UUID')
+    Action = models.CharField(max_length=16, db_column='Action', verbose_name='操作(view/use/manage/grant)')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='归属租户(null=跨租户)')
+    CompanyUUID = UUIDField(null=True, blank=True, db_column='CompanyUUID', verbose_name='归属公司(null=租户内全部公司)')
+    GrantStatus = models.SmallIntegerField(default=1, db_column='GrantStatus', verbose_name='状态(1生效/0撤销)')
+    GrantBy = UUIDField(null=True, blank=True, db_column='GrantBy', verbose_name='授权人UUID')
+    GrantTime = models.DateTimeField(default=_UtcNow, verbose_name='授权时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'RAMGrant'
+        verbose_name = 'RAM授权'
+        verbose_name_plural = 'RAM授权'
+        unique_together = [
+            ('PrincipalType', 'PrincipalUUID', 'ResourceType', 'ResourceUUID',
+             'Action', 'TenantUUID', 'CompanyUUID'),
+        ]
+        indexes = [
+            models.Index(fields=['PrincipalUUID', 'ResourceType'], name='idx_ram_principal'),
+            models.Index(fields=['ResourceType', 'ResourceUUID'], name='idx_ram_resource'),
+        ]
+
+    def __str__(self):
+        return f'{self.PrincipalType}:{self.PrincipalUUID} {self.Action} {self.ResourceType}:{self.ResourceUUID}'
+
+
 # === 用户 ABAC 表 ===
 
 class UserABAC(QModel):

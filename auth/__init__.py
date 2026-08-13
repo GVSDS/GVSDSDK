@@ -6,7 +6,7 @@ __all__ = [
     'IsAdminUser', 'IsCompanyMember', 'CompanyScopedMixin', 'TenantScopedMixin', 'UserScopedMixin', 'PermissionVerifier',
     'IsAdminScopeDisabled', 'IsTenantScopeDisabled',
     'IsAdmin', 'IsSuperAdmin', 'IsTenantAdmin', 'IsCompanyAdmin',
-    'RoleManager', 'ShopManager', 'PositionManager', 'AuthManager', 'AdminUserManager', 'TenantManager', 'CompanyManager', 'DepartmentManager', 'MessageManager', 'UserService',
+    'RoleManager', 'ShopManager', 'PositionManager', 'AuthManager', 'AdminUserManager', 'TenantManager', 'CompanyManager', 'DepartmentManager', 'MessageManager', 'UserService', 'RAMManager',
 ]
 
 
@@ -33,6 +33,11 @@ def __getattr__(name):
         return val
     if name in ('RoleManager', 'ShopManager', 'PositionManager', 'AuthManager', 'AdminUserManager', 'TenantManager', 'CompanyManager', 'DepartmentManager'):
         from gvsdsdk.auth import managers as _m
+        val = getattr(_m, name)
+        globals()[name] = val
+        return val
+    if name == 'RAMManager':
+        from gvsdsdk.auth import ram as _m
         val = getattr(_m, name)
         globals()[name] = val
         return val

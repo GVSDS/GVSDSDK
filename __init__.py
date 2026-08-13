@@ -229,6 +229,7 @@ _LAZY_SYMBOLS = {
     'DepartmentManager': ('auth', 'DepartmentManager'),
     'MessageManager': ('auth', 'MessageManager'),
     'UserService': ('auth', 'UserService'),
+    'RAMManager': ('auth', 'RAMManager'),
 
     # ── 分佣引擎 ──────────────────────────────────────────
     'CommissionEngine': ('commission', 'CommissionEngine'),
@@ -295,6 +296,7 @@ _LAZY_SYMBOLS = {
     'UserLoginLog': ('models', 'UserLoginLog'),
     'AccountActivation': ('models', 'AccountActivation'),
     'RolePermission': ('models', 'RolePermission'),
+    'RAMGrant': ('models', 'RAMGrant'),
     'UserABAC': ('models', 'UserABAC'),
     'Password': ('models', 'Password'),
     'Shop': ('models', 'Shop'),
