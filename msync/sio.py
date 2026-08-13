@@ -543,5 +543,39 @@ def on_tx_query(sid, data):
     return _ok(results)
 
 
+@sio.on('msync:app:manifest:report', namespace=NS)
+def on_app_manifest_report(sid, data):
+    """子服务器上报应用清单（远端 App 注入）
+
+    请求体：{ServiceName, ServiceDomain, Manifests: [AppManifest dict]}
+    响应：{code, data: {Registered: [AppCode], Failed: [{AppCode, Reason}]}}
+
+    处理委托主服务器 gvsds.apps.gerp.app_manifests.SyncRemoteAppManifests
+    （惰性导入，gvsdsdk 独立部署时返回 501）。
+    """
+    if not _RequireAuth(sid):
+        return _err('需要密钥认证', 401)
+    with _map_lock:
+        service_name = _sid_service_map.get(sid)
+    if not service_name:
+        return _err('服务未注册', 401)
+    manifests = _d(data, 'Manifests', [])
+    if not isinstance(manifests, list):
+        return _err('Manifests 必须为列表', 400)
+    service_domain = _d(data, 'ServiceDomain', '') or ''
+    try:
+        from gvsds.apps.gerp.app_manifests import SyncRemoteAppManifests
+    except ImportError:
+        return _err('主服务器未启用远端清单注册（gvsds 未安装）', 501)
+    try:
+        result = SyncRemoteAppManifests(
+            manifests, service_name, service_domain,
+        )
+    except Exception as e:
+        logger.error(f'远端清单同步异常: {e}\n{traceback.format_exc()}')
+        return _err(str(e), 500)
+    return _ok(result)
+
+
 def create_sio_app(django_app):
     return socketio.WSGIApp(sio, django_app)
