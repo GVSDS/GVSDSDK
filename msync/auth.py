@@ -291,3 +291,106 @@ def RefreshServiceToken(refresh_token):
 
     old_token.Revoke()
     return IssueServiceToken(node)
+
+
+# ─── 用户级令牌（iframe 跨服务器用户身份透传） ─────────────────────────
+
+#: 用户令牌类型标识（ServiceTokenEncoder payload['typ']）
+USER_TOKEN_TYPE = 'user'
+
+#: 用户令牌默认 TTL（分钟）
+USER_TOKEN_TTL_MINUTES = 10
+
+
+def IssueUserToken(UserUUID, RoleUUID=None, CompanyUUID=None, TenantUUID=None,
+                   AudienceService=None, TTLMinutes=USER_TOKEN_TTL_MINUTES,
+                   MasterSecret=None):
+    """签发用户级短期令牌——供员工 iframe 访问子服务器页面时透传用户身份
+
+    与 ServiceToken 同构（HMAC-SHA256 + exp），差异：
+        - payload['typ'] = 'user'（区分服务令牌）
+        - sub = UserUUID
+        - 附带 RoleUUID/CompanyUUID/TenantUUID（当前角色上下文）
+        - aud = 目标服务名（子服务器校验，防令牌串用）
+        - TTL 短（默认 10min，防泄漏）
+
+    Args:
+        UserUUID: 用户 UUID（str/bytes/UUIDObj）
+        RoleUUID: 当前角色 UUID（可选）
+        CompanyUUID: 当前公司 UUID（可选）
+        TenantUUID: 当前租户 UUID（可选）
+        AudienceService: 目标服务名（可选，子服务器侧校验 aud）
+        TTLMinutes: 有效分钟数（默认 10）
+        MasterSecret: MASTER_SECRET（缺省从配置读取）
+
+    Returns:
+        (token_str, expires_at_ts) 或 None
+    """
+    import datetime as _dt
+    from gvsdsdk.model_utils import UUIDObj
+    try:
+        user_uuid_str = str(UUIDObj(UserUUID)) if UserUUID else ''
+    except Exception:
+        user_uuid_str = str(UserUUID) if UserUUID else ''
+    if not user_uuid_str:
+        return None, None
+    master = MasterSecret or _get_master_secret()
+    now = _dt.datetime.now(_dt.timezone.utc)
+    expires = now + _dt.timedelta(minutes=TTLMinutes)
+    payload = {
+        'iss': 'MSYNC',
+        'typ': USER_TOKEN_TYPE,
+        'sub': user_uuid_str,
+        'exp': int(expires.timestamp()),
+    }
+    for key, val in (('RoleUUID', RoleUUID), ('CompanyUUID', CompanyUUID),
+                     ('TenantUUID', TenantUUID)):
+        if val:
+            try:
+                payload[key] = str(UUIDObj(val))
+            except Exception:
+                payload[key] = str(val)
+    if AudienceService:
+        payload['aud'] = AudienceService
+    encoder = ServiceTokenEncoder(master)
+    token = encoder.Encode(payload, master_secret=master)
+    return token, int(expires.timestamp())
+
+
+def IntrospectUserToken(Token, AudienceService=None, MasterSecret=None):
+    """自省用户令牌：验证签名/过期/类型，返回用户上下文 payload 或 None
+
+    校验：
+        1. 签名 + exp（ServiceTokenEncoder.Decode）
+        2. typ == 'user'（防把服务令牌当用户令牌）
+        3. aud：传 AudienceService 时，令牌 aud 必须为空或等于目标服务
+           （防令牌被其他子服务器串用）
+
+    Args:
+        Token: 用户令牌
+        AudienceService: 期望目标服务名（可选）
+        MasterSecret: MASTER_SECRET（缺省从配置读取）
+
+    Returns:
+        dict：{UserUUID, RoleUUID?, CompanyUUID?, TenantUUID?, Audience?}
+        （校验失败返回 None）
+    """
+    master = MasterSecret or _get_master_secret()
+    encoder = ServiceTokenEncoder(master)
+    payload = encoder.Decode(Token)
+    if not payload or payload.get('typ') != USER_TOKEN_TYPE:
+        return None
+    if AudienceService:
+        aud = payload.get('aud')
+        if aud not in (None, '', AudienceService):
+            return None
+    user_uuid = payload.get('sub')
+    if not user_uuid:
+        return None
+    return {
+        'UserUUID': user_uuid,
+        'RoleUUID': payload.get('RoleUUID') or None,
+        'CompanyUUID': payload.get('CompanyUUID') or None,
+        'TenantUUID': payload.get('TenantUUID') or None,
+        'Audience': payload.get('aud') or None,
+    }

@@ -167,6 +167,35 @@ class AuthTokenIntrospectView(APIView):
             return Response({'Valid': False, 'Active': False})
 
 
+class UserTokenIntrospectView(APIView):
+    """用户令牌自省端点 — 供子服务器验证用户级令牌（iframe 身份透传）
+
+    入参：AccessToken（用户令牌）、AudienceService（期望目标服务，可选）
+    校验：签名/过期/typ=user/aud 匹配；返回用户上下文 {UserUUID, RoleUUID,
+    CompanyUUID, TenantUUID}，子服务器按此构建请求用户。
+    """
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        from gvsdsdk.msync.auth import IntrospectUserToken
+        access_token = request.data.get('AccessToken', '')
+        if not access_token:
+            return Response(_err('AccessToken 不能为空', 400), status=400)
+
+        try:
+            ctx = IntrospectUserToken(
+                access_token,
+                AudienceService=request.data.get('AudienceService') or None,
+            )
+            if ctx is None:
+                return Response({'Valid': False, 'Active': False})
+            return Response({'Valid': True, 'Active': True, 'Payload': ctx})
+        except Exception as e:
+            logger.error(f'用户令牌自省异常: {e}\n{traceback.format_exc()}')
+            return Response({'Valid': False, 'Active': False})
+
+
 class RegistryListView(APIView):
     authentication_classes = [ServiceTokenAuthentication]
 

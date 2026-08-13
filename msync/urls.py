@@ -7,6 +7,7 @@ urlpatterns = [
     path('auth/token/', views.AuthTokenView.as_view(), name='auth_token'),
     path('auth/token/refresh/', views.AuthTokenRefreshView.as_view(), name='auth_token_refresh'),
     path('auth/introspect/', views.AuthTokenIntrospectView.as_view(), name='auth_introspect'),
+    path('user/token/introspect/', views.UserTokenIntrospectView.as_view(), name='user_token_introspect'),
 
     path('registry/', views.RegistryListView.as_view(), name='registry_list'),
     path('registry/<str:name>/', views.RegistryDetailView.as_view(), name='registry_detail'),
