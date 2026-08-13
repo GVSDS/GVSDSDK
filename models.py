@@ -501,6 +501,7 @@ class Department(QModel):
     """部门表——组织架构层级（映射 SAAS 主库 Dept 表）"""
 
     DeptUUID = UUIDField(primary_key=True, db_column='DeptUUID', verbose_name='部门UUID')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
     CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
     ParentDeptUUID = UUIDField(null=True, blank=True, db_column='ParentDeptUUID', verbose_name='上级部门UUID')
     DeptName = models.CharField(max_length=256, db_column='DeptName', verbose_name='部门名称')
@@ -835,6 +836,7 @@ class Shop(QModel):
     """
 
     ShopUUID = UUIDField(primary_key=True, db_column='ShopUUID', verbose_name='商铺UUID')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
     CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
     ShopName = models.CharField(max_length=128, db_column='ShopName', verbose_name='商铺名称')
     ShopCode = models.CharField(max_length=64, default='', db_column='ShopCode', verbose_name='商铺编码')
@@ -1303,6 +1305,7 @@ class Workgroup(QModel):
     """工作组表——跨部门协作单元（映射 SAAS 主库 Workgroup 表）"""
 
     WorkgroupUUID = UUIDField(primary_key=True, db_column='WorkgroupUUID', verbose_name='工作组UUID')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
     CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
     WorkgroupName = models.CharField(max_length=256, db_column='WorkgroupName', verbose_name='工作组名称')
     WorkgroupEnglishName = models.CharField(max_length=256, db_column='WorkgroupEnglishName', verbose_name='工作组英文名')
