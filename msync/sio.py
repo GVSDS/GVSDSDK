@@ -100,6 +100,12 @@ def on_disconnect(sid):
             ServiceRegistry.Deregister(service_name)
         except Exception:
             pass
+        # 子服务器下线：标记其提供的远端 App 为离线（gvsds 侧，惰性导入）
+        try:
+            from gvsds.apps.gerp.app_manifests import MarkServiceAppsOffline
+            MarkServiceAppsOffline(service_name)
+        except ImportError:
+            pass
         sio.emit('msync:service:offline', {'Service': service_name}, namespace=NS, skip_sid=sid)
         logger.info(f'[SIO] 服务断开: {service_name} ({sid})')
     else:
@@ -279,6 +285,12 @@ def on_deregister(sid, data):
         ServiceRegistry.Deregister(name)
     except RegistryError as e:
         return _err(str(e), 404)
+    # 子服务器注销：标记其提供的远端 App 为离线（gvsds 侧，惰性导入）
+    try:
+        from gvsds.apps.gerp.app_manifests import MarkServiceAppsOffline
+        MarkServiceAppsOffline(name)
+    except ImportError:
+        pass
     sio.emit('msync:service:offline', {'Service': name}, namespace=NS, skip_sid=sid)
     return _ok(msg='注销成功')
 
