@@ -526,6 +526,7 @@ class UserRoleDepartment(QModel):
     UserRoleDepartmentUUID = UUIDField(primary_key=True, db_column='UserRoleDepartmentUUID', verbose_name='关联UUID')
     UserRoleUUID = UUIDField(db_column='UserRoleUUID', verbose_name='用户-角色关联UUID')
     DeptUUID = UUIDField(db_column='DeptUUID', verbose_name='部门UUID')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
     CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
     RoleType = models.SmallIntegerField(default=0, db_column='RoleType', verbose_name='角色类型')
     CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
@@ -546,6 +547,7 @@ class UserRoleWorkgroup(QModel):
     UserRoleWorkgroupUUID = UUIDField(primary_key=True, db_column='UserRoleWorkgroupUUID', verbose_name='关联UUID')
     UserRoleUUID = UUIDField(db_column='UserRoleUUID', verbose_name='用户-角色关联UUID')
     WorkgroupUUID = UUIDField(db_column='WorkgroupUUID', verbose_name='工作组UUID')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
     CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
     RoleType = models.SmallIntegerField(default=0, db_column='RoleType', verbose_name='角色类型')
     CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
@@ -1021,6 +1023,7 @@ class Menu(QModel):
     """菜单表——系统导航与功能入口（映射 SAAS 主库 Menu 表）"""
 
     MenuUUID = UUIDField(primary_key=True, db_column='MenuUUID', verbose_name='菜单UUID')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
     CompanyUUID = UUIDField(null=True, blank=True, db_column='CompanyUUID', verbose_name='公司UUID')
     ParentMenuUUID = UUIDField(null=True, blank=True, db_column='ParentMenuUUID', verbose_name='上级菜单UUID')
     MenuName = models.CharField(max_length=128, db_column='MenuName', verbose_name='菜单名称')
@@ -1173,6 +1176,7 @@ class FileAsset(QModel):
     """文件资产表——文件存储与引用管理（映射 SAAS 主库 FileAsset 表）"""
 
     AssetUUID = UUIDField(primary_key=True, db_column='AssetUUID', verbose_name='资产UUID')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
     CompanyUUID = UUIDField(null=True, blank=True, db_column='CompanyUUID', verbose_name='公司UUID')
     FileName = models.CharField(max_length=256, db_column='FileName', verbose_name='文件名')
     FileSHA1 = models.CharField(max_length=40, unique=True, db_column='FileSHA1', verbose_name='文件SHA1')
