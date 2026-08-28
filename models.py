@@ -744,24 +744,18 @@ class UserRole(QModel):
     通过 CompanyUUID 标识该用户-角色关联所属的公司，
     用于菜单按公司差异化显示、数据权限按公司过滤等场景。
     同一用户在不同公司下可绑定不同角色。
-    RoleType 标识该用户在部门/工作组中的角色类型：0=普通成员/部门员工，1=组长/部门负责人。
     RoleName 为可选的角色名覆盖：非空时前端展示用此名，为空时回退到 Role.RoleName。
     这避免了为每个用户单独建角色，又能让同角色在不同用户视角下显示差异化名称。
 
-    注意：DeptUUID、WorkgroupUUID 为遗留字段（已废弃）——部门/工作组归属已迁移到
-    UserRoleDepartment/UserRoleWorkgroup 关联表，字段仅保留兼容存量数据，禁止再次写入。
-
-    注意：UserUUID/RoleUUID/CompanyUUID/DeptUUID/WorkgroupUUID 在 gvsds 中是 ForeignKey，
-    但此处改为 UUIDField 以保持独立性（不支持 select_related 和关联属性访问）。
+    注意：部门/工作组归属与成员类型（RoleType）不在此表——一律以关联表
+    UserRoleDepartment / UserRoleWorkgroup 为准（负责人=关联表 RoleType=1）。
+    原 DeptUUID/WorkgroupUUID/RoleType 遗留字段已删除（见 0002 迁移）。
     """
 
     UserRoleUUID = UUIDField(primary_key=True, db_column='UserRoleUUID', verbose_name='关联UUID')
     UserUUID = UUIDField(db_column='UserUUID', verbose_name='用户UUID')
     RoleUUID = UUIDField(db_column='RoleUUID', verbose_name='角色UUID')
     CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
-    DeptUUID = UUIDField(null=True, blank=True, db_column='DeptUUID', verbose_name='部门UUID')
-    WorkgroupUUID = UUIDField(null=True, blank=True, db_column='WorkgroupUUID', verbose_name='工作组UUID')
-    RoleType = models.SmallIntegerField(default=0, db_column='RoleType', verbose_name='角色类型')
     RoleName = models.CharField(max_length=128, null=True, blank=True, db_column='RoleName', verbose_name='角色名覆盖')
     CreateTime = models.DateTimeField(default=_UtcNow, verbose_name='创建时间')
 
