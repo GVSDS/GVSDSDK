@@ -168,8 +168,11 @@ class RoleManager:
         """获取用户的 UserRole 关联详情（按行返回，保留行级信息）
 
         与 GetRolesForUser（仅返回 Role）互补：本方法保留 UserRole 的
-        CompanyUUID、RoleName 覆盖、RoleType、UserRoleUUID 等行级字段，
+        CompanyUUID、RoleName 覆盖、UserRoleUUID 等行级字段，
         供需要展示"角色+公司+覆盖名"等富信息的场景使用。
+
+        注意：UserRole 的部门/工作组归属与成员类型（RoleType）已废弃，
+        一律以 UserRoleDepartment / UserRoleWorkgroup 关联表为准。
 
         Returns:
             list[UserRole]：UserRole 实例列表（保持数据库顺序）
@@ -206,6 +209,45 @@ class RoleManager:
         return UserRoleWorkgroup.objects.filter(
             UserRoleUUID=UUIDObj(UserRoleUUID).bytes,
         ).first()
+
+    @staticmethod
+    def GetUserRoleDepartments(UserRoleUUID, CompanyUUID=None, RoleType=None):
+        """按 UserRoleUUID 查询部门归属列表（一个用户-角色对可挂多个部门）
+
+        Args:
+            UserRoleUUID: 用户-角色关联 UUID
+            CompanyUUID: 公司 UUID（跨公司隔离：与 UserRole 必须同公司）
+            RoleType: 成员类型过滤（0=成员，1=负责人）；负责人判定以关联表为准
+
+        Returns:
+            list[UserRoleDepartment]：关联行列表（保持数据库顺序）
+        """
+        qs = UserRoleDepartment.objects.filter(
+            UserRoleUUID=UUIDObj(UserRoleUUID).bytes,
+        )
+        if CompanyUUID is not None:
+            try:
+                qs = qs.filter(CompanyUUID=UUIDObj(CompanyUUID).bytes)
+            except Exception:
+                qs = qs.filter(CompanyUUID=CompanyUUID)
+        if RoleType is not None:
+            qs = qs.filter(RoleType=RoleType)
+        return list(qs)
+
+    @staticmethod
+    def GetUserRoleWorkgroups(UserRoleUUID, CompanyUUID=None, RoleType=None):
+        """按 UserRoleUUID 查询工作组归属列表（一个用户-角色对可挂多个工作组）"""
+        qs = UserRoleWorkgroup.objects.filter(
+            UserRoleUUID=UUIDObj(UserRoleUUID).bytes,
+        )
+        if CompanyUUID is not None:
+            try:
+                qs = qs.filter(CompanyUUID=UUIDObj(CompanyUUID).bytes)
+            except Exception:
+                qs = qs.filter(CompanyUUID=CompanyUUID)
+        if RoleType is not None:
+            qs = qs.filter(RoleType=RoleType)
+        return list(qs)
 
     @staticmethod
     def GetScopeMembers(ScopeType, UUID):
