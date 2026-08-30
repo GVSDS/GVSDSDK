@@ -2,7 +2,7 @@ import uuid
 from django.db.models import Q
 from django.utils import timezone as _timezone
 
-from gvsdsdk.models import Role, UserRole, UserRoleDepartment, UserRoleWorkgroup, RolePermission, Permission, Position, PositionTemplate, PositionTemplatePermission, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, Message, Menu, WorkOrder, AuditLog, ItemReference, Backpack, FileAsset
+from gvsdsdk.models import Role, UserRole, UserRoleDepartment, UserRoleDepartmentPosition, UserRoleWorkgroup, RolePermission, Permission, Position, PositionCategory, PositionTemplate, PositionTemplatePermission, AppPosition, AppVirtualPosition, AppVirtualBinding, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, Message, Menu, WorkOrder, AuditLog, ItemReference, Backpack, FileAsset
 from gvsdsdk.auth.crypto import HashPassword, VerifyPassword
 from gvsdsdk.model_utils import _GetUserModel, UUIDObj
 
@@ -839,6 +839,465 @@ class PositionManager:
         return PositionTemplatePermission.objects.filter(
             PositionTemplateUUID=TemplateUUID, PermUUID=PermUUID,
         ).exists()
+
+    # ── 通用部门（职务分类目录） ──────────────────────────────
+
+    @staticmethod
+    def CreateCategory(Name, TenantUUID, Code, Sort=0, Status=1, Desc=''):
+        """创建通用部门（职务分类目录）；返回 PositionCategory 实例"""
+        cat = PositionCategory(
+            PositionCategoryUUID=uuid.uuid4().bytes,
+            TenantUUID=TenantUUID,
+            CategoryName=Name,
+            CategoryCode=Code,
+            CategorySort=Sort,
+            CategoryStatus=Status,
+            CategoryDesc=Desc,
+            CreateTime=_timezone.now(),
+            UpdateTime=_timezone.now(),
+        )
+        cat.save()
+        return cat
+
+    @staticmethod
+    def GetCategoriesForTenant(TenantUUID):
+        """获取租户下全部通用部门（含禁用，用于目录展示/搜索）"""
+        return PositionCategory.objects.filter(TenantUUID=TenantUUID)
+
+    @staticmethod
+    def GetCategoryByUUID(CategoryUUID):
+        """按 UUID 查询通用部门（不存在返回 None）"""
+        return PositionCategory.objects.filter(PositionCategoryUUID=CategoryUUID).first()
+
+    @staticmethod
+    def UpdateCategory(CategoryUUID, **Fields):
+        """更新通用部门字段（白名单：CategoryName/CategoryCode/CategorySort/CategoryStatus/CategoryDesc）
+
+        Returns:
+            更新后的 PositionCategory 实例；不存在返回 None
+        """
+        cat = PositionCategory.objects.filter(PositionCategoryUUID=CategoryUUID).first()
+        if not cat:
+            return None
+        allowed = ('CategoryName', 'CategoryCode', 'CategorySort', 'CategoryStatus', 'CategoryDesc')
+        update_fields = []
+        for key, value in Fields.items():
+            if key in allowed:
+                setattr(cat, key, value)
+                update_fields.append(key)
+        cat.UpdateTime = _timezone.now()
+        update_fields.append('UpdateTime')
+        if update_fields:
+            cat.save(update_fields=update_fields)
+        return cat
+
+    @staticmethod
+    def DeleteCategory(CategoryUUID):
+        """软删除通用部门（CategoryStatus=0）；返回是否命中"""
+        cat = PositionCategory.objects.filter(PositionCategoryUUID=CategoryUUID).first()
+        if not cat:
+            return False
+        cat.CategoryStatus = 0
+        cat.UpdateTime = _timezone.now()
+        cat.save(update_fields=['CategoryStatus', 'UpdateTime'])
+        return True
+
+    # ── 部门职务多值子表（UserRoleDepartmentPosition） ────────
+
+    @staticmethod
+    def _ToBytes(value):
+        """把 bytes/str/UUIDObj 归一化为 bytes；无效返回 None"""
+        if value is None:
+            return None
+        try:
+            return UUIDObj(value).bytes
+        except Exception:
+            return None
+
+    @staticmethod
+    def GetUrdPositionRows(UserRoleDepartmentUUID):
+        """查询 URD 关联的全部职务子表行（UserRoleDepartmentPosition）"""
+        return UserRoleDepartmentPosition.objects.filter(UserRoleDepartmentUUID=UserRoleDepartmentUUID)
+
+    @staticmethod
+    def GetUrdPositionUUIDs(UserRoleDepartmentUUID):
+        """URD 关联的职务 UUID 列表（UUIDObj 元素）"""
+        return list(
+            UserRoleDepartmentPosition.objects.filter(
+                UserRoleDepartmentUUID=UserRoleDepartmentUUID
+            ).values_list('PositionUUID', flat=True)
+        )
+
+    @staticmethod
+    def HasUrdPosition(UserRoleDepartmentUUID, PositionUUID):
+        """URD 是否已挂该职务（bytes 归一化比较）"""
+        urd_pk = PositionManager._ToBytes(UserRoleDepartmentUUID)
+        pos_pk = PositionManager._ToBytes(PositionUUID)
+        if urd_pk is None or pos_pk is None:
+            return False
+        return UserRoleDepartmentPosition.objects.filter(
+            UserRoleDepartmentUUID=urd_pk, PositionUUID=pos_pk
+        ).exists()
+
+    @staticmethod
+    def AddPositionToUrd(UserRoleDepartmentUUID, PositionUUID, CompanyUUID=None, TenantUUID=None):
+        """给 URD 挂职务（重复/并发冲突跳过返回 None）；成功返回子表行"""
+        urd_pk = PositionManager._ToBytes(UserRoleDepartmentUUID)
+        pos_pk = PositionManager._ToBytes(PositionUUID)
+        if urd_pk is None or pos_pk is None:
+            return None
+        if PositionManager.HasUrdPosition(urd_pk, pos_pk):
+            return None
+        try:
+            return UserRoleDepartmentPosition.objects.create(
+                UserRoleDepartmentPositionUUID=uuid.uuid4().bytes,
+                UserRoleDepartmentUUID=urd_pk,
+                PositionUUID=pos_pk,
+                TenantUUID=TenantUUID,
+                CompanyUUID=CompanyUUID,
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def RemovePositionFromUrd(UserRoleDepartmentUUID, PositionUUID):
+        """移除 URD 上的职务；返回是否命中"""
+        urd_pk = PositionManager._ToBytes(UserRoleDepartmentUUID)
+        pos_pk = PositionManager._ToBytes(PositionUUID)
+        if urd_pk is None or pos_pk is None:
+            return False
+        deleted, _ = UserRoleDepartmentPosition.objects.filter(
+            UserRoleDepartmentUUID=urd_pk, PositionUUID=pos_pk
+        ).delete()
+        return deleted > 0
+
+    @staticmethod
+    def ClearUrdPositions(UserRoleDepartmentUUID):
+        """清空 URD 上的全部职务（级联删除用）；返回删除条数"""
+        urd_pk = PositionManager._ToBytes(UserRoleDepartmentUUID)
+        if urd_pk is None:
+            return 0
+        deleted, _ = UserRoleDepartmentPosition.objects.filter(
+            UserRoleDepartmentUUID=urd_pk
+        ).delete()
+        return deleted
+
+    @staticmethod
+    def SetUrdPositions(UserRoleDepartmentUUID, PositionUUIDs, CompanyUUID=None, TenantUUID=None):
+        """整体重写 URD 职务集合；返回 (created, removed)"""
+        urd_pk = PositionManager._ToBytes(UserRoleDepartmentUUID)
+        if urd_pk is None:
+            return (0, 0)
+        removed, _ = UserRoleDepartmentPosition.objects.filter(
+            UserRoleDepartmentUUID=urd_pk
+        ).delete()
+        created = 0
+        for _pos in PositionUUIDs or []:
+            if PositionManager.AddPositionToUrd(urd_pk, _pos, CompanyUUID, TenantUUID):
+                created += 1
+        return (created, removed)
+
+    @staticmethod
+    def ResolvePrimaryUrd(UserRoleUUID, CompanyUUID=None):
+        """解析 UserRoleUUID → 主 UserRoleDepartment 关联（同公司优先，否则首条）；无则 None"""
+        ur_bytes = PositionManager._ToBytes(UserRoleUUID)
+        if ur_bytes is None:
+            return None
+        qs = UserRoleDepartment.objects.filter(UserRoleUUID=ur_bytes)
+        company_bytes = PositionManager._ToBytes(CompanyUUID)
+        if company_bytes:
+            qs = qs.filter(CompanyUUID=company_bytes)
+        return qs.first()
+
+    @staticmethod
+    def WritePositionsToPrimaryUrd(UserRoleUUID, PositionUUIDs, CompanyUUID=None, TenantUUID=None, Rewrite=True):
+        """把职务集合写入 UserRole 的主部门关联（URDP 子表）。
+
+        Rewrite=True 整体重写（编辑回显全量，对齐 UserRole 表编辑职务语义）；
+        Rewrite=False 仅追加缺失（新增成员时保留该员工在部门已有的职务）。
+        返回实际写入数量；无主关联时返回 0。
+        """
+        urd = PositionManager.ResolvePrimaryUrd(UserRoleUUID, CompanyUUID)
+        if urd is None:
+            return 0
+        if Rewrite:
+            UserRoleDepartmentPosition.objects.filter(
+                UserRoleDepartmentUUID=urd.UserRoleDepartmentUUID
+            ).delete()
+        created = 0
+        for _pos in PositionUUIDs or []:
+            if PositionManager.AddPositionToUrd(
+                urd.UserRoleDepartmentUUID,
+                _pos,
+                CompanyUUID=getattr(urd, 'CompanyUUID', None),
+                TenantUUID=getattr(urd, 'TenantUUID', None),
+            ):
+                created += 1
+        return created
+
+    @staticmethod
+    def BatchAddPositions(urd_objs, position_bytes):
+        """批量给多个 URD 关联追加职务（bytes 归一化查重防联合唯一 1062，重复跳过）。
+
+        urd_objs: UserRoleDepartment 实例列表（取 UserRoleDepartmentUUID/TenantUUID/CompanyUUID）。
+        position_bytes: bytes 职务 UUID 列表。返回实际新增数。
+        """
+        affected = 0
+        if not urd_objs or not position_bytes:
+            return 0
+        urd_pks = []
+        for _u in urd_objs:
+            _pk = PositionManager._ToBytes(getattr(_u, 'UserRoleDepartmentUUID', None))
+            if _pk:
+                urd_pks.append(_pk)
+        existing = set()
+        for _r in UserRoleDepartmentPosition.objects.filter(
+            UserRoleDepartmentUUID__in=urd_pks, PositionUUID__in=position_bytes
+        ).values_list('UserRoleDepartmentUUID', 'PositionUUID'):
+            existing.add((PositionManager._ToBytes(_r[0]), PositionManager._ToBytes(_r[1])))
+        for _u in urd_objs:
+            _urd_pk = PositionManager._ToBytes(getattr(_u, 'UserRoleDepartmentUUID', None))
+            if _urd_pk is None:
+                continue
+            for _pb in position_bytes:
+                if (_urd_pk, _pb) in existing:
+                    continue
+                try:
+                    UserRoleDepartmentPosition.objects.create(
+                        UserRoleDepartmentPositionUUID=uuid.uuid4().bytes,
+                        UserRoleDepartmentUUID=_u.UserRoleDepartmentUUID,
+                        PositionUUID=_pb,
+                        TenantUUID=getattr(_u, 'TenantUUID', None),
+                        CompanyUUID=getattr(_u, 'CompanyUUID', None),
+                    )
+                    affected += 1
+                except Exception:
+                    continue
+        return affected
+
+    @staticmethod
+    def BatchRemovePositions(urd_objs, position_bytes):
+        """批量移除多个 URD 关联上的职务；返回移除条数"""
+        if not urd_objs or not position_bytes:
+            return 0
+        urd_pks = []
+        for _u in urd_objs:
+            _pk = PositionManager._ToBytes(getattr(_u, 'UserRoleDepartmentUUID', None))
+            if _pk:
+                urd_pks.append(_pk)
+        _del_qs = UserRoleDepartmentPosition.objects.filter(
+            UserRoleDepartmentUUID__in=urd_pks, PositionUUID__in=position_bytes
+        )
+        affected = _del_qs.count()
+        _del_qs.delete()
+        return affected
+
+    # ── 职务搜索（列表 + 通用部门树） ────────────────────────
+
+    @staticmethod
+    def SearchPositions(TenantUUID, Keyword='', Tree=False, Limit=50, PriorityCategoryUUIDs=None):
+        """搜索租户职务：list 平铺 + tree 通用部门树（全部租户分类，PriorityCategoryUUIDs 排前）。
+
+        Args:
+            TenantUUID: 租户 UUID（bytes/str/UUIDObj）；为空返回空列表（fail-closed）
+            Keyword: 职务名称关键字
+            Tree: True 时返回通用部门树 + 职务归组（不截断）；False 平铺且限 Limit 条
+            Limit: 非 tree 模式条数上限
+            PriorityCategoryUUIDs: 排序置前的通用部门 UUID 集合（bytes/str 均可）
+
+        Returns:
+            {'list': [{PositionUUID(str), PositionName, PositionCode, CategoryUUID(str)}],
+             'tree': [{uuid, name, parentUuid}]}（tree 模式才有）
+        """
+        tenant_bytes = PositionManager._ToBytes(TenantUUID)
+        if tenant_bytes is None:
+            return {'list': [], 'tree': []}
+        qs = Position.objects.filter(TenantUUID=tenant_bytes)
+        if Keyword:
+            qs = qs.filter(PositionName__icontains=Keyword)
+        if not Tree:
+            qs = qs[:Limit]
+        data = list(qs.values('PositionUUID', 'PositionName', 'PositionCode', 'CategoryUUID'))
+        for item in data:
+            if item.get('PositionUUID'):
+                item['PositionUUID'] = str(UUIDObj(item['PositionUUID']))
+            if item.get('CategoryUUID'):
+                item['CategoryUUID'] = str(UUIDObj(item['CategoryUUID']))
+        result = {'list': data}
+        if Tree:
+            cat_rows = list(PositionCategory.objects.filter(TenantUUID=tenant_bytes).values(
+                'PositionCategoryUUID', 'CategoryName'
+            ))
+            if PriorityCategoryUUIDs:
+                pri_cats = set()
+                for _c in PriorityCategoryUUIDs:
+                    _pb = PositionManager._ToBytes(_c)
+                    if _pb:
+                        pri_cats.add(_pb)
+
+                def _cat_key(c):
+                    try:
+                        _pb = UUIDObj(c['PositionCategoryUUID']).bytes
+                    except Exception:
+                        _pb = None
+                    return (0 if _pb in pri_cats else 1, c['CategoryName'] or '')
+
+                cat_rows.sort(key=_cat_key)
+            result['tree'] = [
+                {
+                    'uuid': str(UUIDObj(c['PositionCategoryUUID'])),
+                    'name': c['CategoryName'],
+                    'parentUuid': '',
+                }
+                for c in cat_rows
+            ]
+        return result
+
+    @staticmethod
+    def SearchCategories(TenantUUID, Keyword='', Limit=20):
+        """搜索租户通用部门（职务分类目录）；返回 [{PositionCategoryUUID(str), CategoryName}]"""
+        tenant_bytes = PositionManager._ToBytes(TenantUUID)
+        if tenant_bytes is None:
+            return []
+        qs = PositionCategory.objects.filter(TenantUUID=tenant_bytes)
+        if Keyword:
+            qs = qs.filter(CategoryName__icontains=Keyword)
+        data = list(qs[:Limit].values('PositionCategoryUUID', 'CategoryName'))
+        for item in data:
+            if item.get('PositionCategoryUUID'):
+                item['PositionCategoryUUID'] = str(UUIDObj(item['PositionCategoryUUID']))
+        return data
+
+    # ── 应用虚拟职务绑定 ─────────────────────────────────────
+
+    @staticmethod
+    def GetVirtualBindings(AppUUID, CompanyUUID=None):
+        """查询应用的虚拟职务绑定（含实际职务名回显）
+
+        Returns:
+            [{'AppVirtualBindingUUID'(str), 'VirtualPositionUUID'(str), 'VirtualPositionName',
+              'PositionUUID'(str), 'PositionName', 'CompanyUUID'(str)}]
+        """
+        app_bytes = PositionManager._ToBytes(AppUUID)
+        if app_bytes is None:
+            return []
+        qs = AppVirtualBinding.objects.filter(AppUUID=app_bytes)
+        company_bytes = PositionManager._ToBytes(CompanyUUID)
+        if company_bytes:
+            qs = qs.filter(CompanyUUID=company_bytes)
+        bindings = list(qs)
+        pos_map = {PositionManager._ToBytes(p.PositionUUID): p.PositionName for p in Position.objects.filter(
+            PositionUUID__in=[b.PositionUUID for b in bindings] if bindings else []
+        )}
+        vp_map = {PositionManager._ToBytes(v.AppVirtualPositionUUID): v.Name for v in AppVirtualPosition.objects.filter(
+            AppUUID=app_bytes
+        )}
+        result = []
+        for b in bindings:
+            pos_pb = PositionManager._ToBytes(b.PositionUUID)
+            vp_pb = PositionManager._ToBytes(b.VirtualPositionUUID)
+            result.append({
+                'AppVirtualBindingUUID': str(UUIDObj(b.AppVirtualBindingUUID)) if b.AppVirtualBindingUUID else '',
+                'VirtualPositionUUID': str(UUIDObj(b.VirtualPositionUUID)) if b.VirtualPositionUUID else '',
+                'VirtualPositionName': vp_map.get(vp_pb, ''),
+                'PositionUUID': str(UUIDObj(b.PositionUUID)) if b.PositionUUID else '',
+                'PositionName': pos_map.get(pos_pb, ''),
+                'CompanyUUID': str(UUIDObj(b.CompanyUUID)) if b.CompanyUUID else '',
+            })
+        return result
+
+    @staticmethod
+    def SetVirtualBindings(AppUUID, VirtualPositionUUID, PositionUUIDs, CompanyUUID=None, TenantUUID=None):
+        """重写虚拟职务的绑定（仅该公司维度，其它公司绑定保留）
+
+        Args:
+            AppUUID / VirtualPositionUUID: bytes/str/UUIDObj
+            PositionUUIDs: 实际职务 UUID 列表（bytes/str）
+            CompanyUUID: 公司维度（可为 None=全局范围）
+        Returns:
+            {'Bound': 成功绑定数, 'Skipped': 跳过数（联合唯一冲突/无效）}
+        """
+        app_bytes = PositionManager._ToBytes(AppUUID)
+        vp_pb = PositionManager._ToBytes(VirtualPositionUUID)
+        company_bytes = PositionManager._ToBytes(CompanyUUID)
+        if app_bytes is None or vp_pb is None:
+            return {'Bound': 0, 'Skipped': 0}
+        _del_qs = AppVirtualBinding.objects.filter(
+            AppUUID=app_bytes, VirtualPositionUUID=vp_pb
+        )
+        if company_bytes:
+            _del_qs = _del_qs.filter(CompanyUUID=company_bytes)
+        _del_qs.delete()
+        bound = 0
+        skipped = 0
+        for _pos in PositionUUIDs or []:
+            pos_pb = PositionManager._ToBytes(_pos)
+            if pos_pb is None:
+                skipped += 1
+                continue
+            try:
+                AppVirtualBinding.objects.create(
+                    AppVirtualBindingUUID=uuid.uuid4().bytes,
+                    AppUUID=app_bytes,
+                    VirtualPositionUUID=vp_pb,
+                    PositionUUID=pos_pb,
+                    TenantUUID=TenantUUID,
+                    CompanyUUID=company_bytes,
+                )
+                bound += 1
+            except Exception:
+                # 联合唯一 (VirtualPositionUUID, PositionUUID) 不含公司：同名职务已被其它公司绑定时跳过
+                skipped += 1
+        return {'Bound': bound, 'Skipped': skipped}
+
+    @staticmethod
+    def AutoBindVirtualPositions(AppUUID, TenantUUID, CompanyUUID=None):
+        """一键绑定：按名称把虚拟职务自动匹配到真实职务（前提：通用部门与职务模板已同步）。
+
+        对每个虚拟职务（AppVirtualPosition.Name），在同租户 Position 中查找 PositionName 相同者，
+        按公司维度写入 AppVirtualBinding（仅重写该公司/范围的旧绑定，其它公司绑定保留）。
+
+        Returns:
+            (ok, msg, stats): stats={'Bound': [虚拟职务名], 'Unmatched': [虚拟职务名]}
+        """
+        app_bytes = PositionManager._ToBytes(AppUUID)
+        tenant_bytes = PositionManager._ToBytes(TenantUUID)
+        if app_bytes is None or tenant_bytes is None:
+            return False, '无法确定应用或租户', None
+        company_bytes = PositionManager._ToBytes(CompanyUUID)
+        vps = list(AppVirtualPosition.objects.filter(AppUUID=app_bytes))
+        if not vps:
+            return False, '该应用未声明虚拟职务', None
+        pos_by_name = {p.PositionName: p for p in Position.objects.filter(TenantUUID=tenant_bytes)}
+        bound = []
+        unmatched = []
+        for vp in vps:
+            pos = pos_by_name.get(vp.Name)
+            if pos is None:
+                unmatched.append(vp.Name)
+                continue
+            # 仅重写该公司/范围的旧绑定（其它公司绑定保留）
+            _del_qs = AppVirtualBinding.objects.filter(VirtualPositionUUID=vp.AppVirtualPositionUUID)
+            if company_bytes:
+                _del_qs = _del_qs.filter(CompanyUUID=company_bytes)
+            _del_qs.delete()
+            try:
+                AppVirtualBinding.objects.create(
+                    AppVirtualBindingUUID=uuid.uuid4().bytes,
+                    AppUUID=app_bytes,
+                    VirtualPositionUUID=vp.AppVirtualPositionUUID,
+                    PositionUUID=pos.PositionUUID,
+                    TenantUUID=tenant_bytes,
+                    CompanyUUID=company_bytes,
+                )
+                bound.append(vp.Name)
+            except Exception:
+                unmatched.append(f'{vp.Name}（同名职务已被其它公司绑定）')
+        stats = {'Bound': bound, 'Unmatched': unmatched}
+        msg = f'一键绑定完成：绑定 {len(bound)} 个虚拟职务'
+        if unmatched:
+            msg += f'；{len(unmatched)} 个未绑定：{"、".join(unmatched)}（请先同步职务模板或检查名称）'
+        return True, msg, stats
 
 
 class ShopManager:

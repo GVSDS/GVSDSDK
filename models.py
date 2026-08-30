@@ -507,6 +507,7 @@ class Department(QModel):
     DeptName = models.CharField(max_length=256, db_column='DeptName', verbose_name='部门名称')
     DeptSort = models.IntegerField(default=0, db_column='DeptSort', verbose_name='排序')
     DeptStatus = models.SmallIntegerField(default=1, db_column='DeptStatus', verbose_name='部门状态')
+    PositionCategoryUUID = UUIDField(null=True, blank=True, db_column='PositionCategoryUUID', verbose_name='绑定通用部门UUID')
     CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
 
     class Meta:
@@ -528,6 +529,8 @@ class UserRoleDepartment(QModel):
     DeptUUID = UUIDField(db_column='DeptUUID', verbose_name='部门UUID')
     TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
     CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
+    # 注意：PositionUUID 已于 gerp 0034 迁移多值化（改存 UserRoleDepartmentPosition 子表），数据库已删列，
+    # 此处严禁再加回字段，否则 SDK 查询会报 1054 Unknown column
     RoleType = models.SmallIntegerField(default=0, db_column='RoleType', verbose_name='角色类型')
     CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
 
@@ -549,6 +552,7 @@ class UserRoleWorkgroup(QModel):
     WorkgroupUUID = UUIDField(db_column='WorkgroupUUID', verbose_name='工作组UUID')
     TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
     CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
+    # 职务不再存于本表：工作组指向公司的员工关系，职务复用 UserRoleDepartmentPosition 多值子表
     RoleType = models.SmallIntegerField(default=0, db_column='RoleType', verbose_name='角色类型')
     CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
 
@@ -558,6 +562,32 @@ class UserRoleWorkgroup(QModel):
         db_table = 'UserRoleWorkgroup'
         verbose_name = '用户-角色工作组关联'
         verbose_name_plural = '用户-角色工作组关联'
+
+
+# === 用户-角色-部门 职务多对多子表 ===
+
+class UserRoleDepartmentPosition(QModel):
+    """用户-角色对 与 部门关联 的职务多对多子表（映射 SAAS 主库 UserRoleDepartmentPosition 表）
+
+    一个 (用户↔角色)↔部门 关系可身兼数职：职务存放在本子表，
+    UserRoleDepartment 表自身不保留单值 PositionUUID 列。
+    工作组成员复用公司员工关系：职务同样落在本表（主部门关联下）。
+    """
+
+    UserRoleDepartmentPositionUUID = UUIDField(primary_key=True, db_column='UserRoleDepartmentPositionUUID', verbose_name='关联职务UUID')
+    UserRoleDepartmentUUID = UUIDField(db_column='UserRoleDepartmentUUID', verbose_name='用户角色部门关联UUID')
+    PositionUUID = UUIDField(db_column='PositionUUID', verbose_name='职务UUID')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
+    CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'UserRoleDepartmentPosition'
+        unique_together = (('UserRoleDepartmentUUID', 'PositionUUID'),)
+        verbose_name = '部门职务关联'
+        verbose_name_plural = '部门职务关联'
 
 
 # === 消息表 ===
@@ -1038,6 +1068,7 @@ class Position(QModel):
 
     PositionUUID = UUIDField(primary_key=True, db_column='PositionUUID', verbose_name='职务UUID')
     TenantUUID = UUIDField(db_column='TenantUUID', verbose_name='租户UUID')
+    CategoryUUID = UUIDField(null=True, blank=True, db_column='CategoryUUID', verbose_name='通用部门UUID')
     PositionName = models.CharField(max_length=128, db_column='PositionName', verbose_name='职务名称')
     PositionCode = models.CharField(max_length=64, default='', db_column='PositionCode', verbose_name='职务编码')
     PositionLevel = models.SmallIntegerField(default=0, db_column='PositionLevel', verbose_name='职务级别')
@@ -1056,7 +1087,118 @@ class Position(QModel):
     def __str__(self):
         return self.PositionName
 
+
+# === 通用部门表（职务分类目录） ===
+
+class PositionCategory(QModel):
+    """通用部门表——职务分类目录（映射 SAAS 主库 PositionCategory 表）
+
+    租户级内置分类（如 财务=FIN / 行政=ADM / 运维=OPS / 人事=HR / 通用=GEN），
+    每个通用部门有编码缩写。职务绑定通用部门后，编码自动按"缩写+序号"生成
+    （如 FIN01、FIN02），同一租户同一通用部门内递增。
+    """
+
+    PositionCategoryUUID = UUIDField(primary_key=True, db_column='PositionCategoryUUID', verbose_name='通用部门UUID')
+    TenantUUID = UUIDField(db_column='TenantUUID', verbose_name='租户UUID')
+    CategoryName = models.CharField(max_length=128, db_column='CategoryName', verbose_name='通用部门名称')
+    CategoryCode = models.CharField(max_length=64, db_column='CategoryCode', verbose_name='编码缩写')
+    CategorySort = models.SmallIntegerField(default=0, db_column='CategorySort', verbose_name='排序')
+    CategoryStatus = models.SmallIntegerField(default=1, db_column='CategoryStatus', verbose_name='状态')
+    CategoryDesc = models.CharField(max_length=256, default='', db_column='CategoryDesc', verbose_name='描述')
+    CreateTime = models.DateTimeField(default=_UtcNow, verbose_name='创建时间')
+    UpdateTime = models.DateTimeField(default=_UtcNow, verbose_name='更新时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'PositionCategory'
+        verbose_name = '通用部门'
+        verbose_name_plural = '通用部门'
+
+    def __str__(self):
+        return self.CategoryName
+
+
 # （UserDept 表已废弃——员工部门归属已迁移到 UserRoleDepartment 关联表，不再用独立表）
+
+
+class AppPosition(QModel):
+    """应用与职务绑定——只有绑定职务的用户才可见/使用该应用（映射 SAAS 主库 AppPosition 表）
+
+    机制：无该应用绑定记录 = 全员可见（兼容存量）；有绑定 = 用户职务集合须与绑定职务有交集。
+    """
+
+    AppPositionUUID = UUIDField(primary_key=True, db_column='AppPositionUUID', verbose_name='绑定UUID')
+    AppUUID = UUIDField(db_column='AppUUID', verbose_name='应用UUID')
+    PositionUUID = UUIDField(db_column='PositionUUID', verbose_name='职务UUID')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
+    CompanyUUID = UUIDField(null=True, blank=True, db_column='CompanyUUID', verbose_name='公司UUID')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'AppPosition'
+        verbose_name = '应用职务绑定'
+        verbose_name_plural = '应用职务绑定'
+
+    def __str__(self):
+        return f'{self.AppUUID} → {self.PositionUUID}'
+
+
+class AppVirtualPosition(QModel):
+    """应用虚拟职务——应用清单声明的职务抽象（如"查看者/审批者"）（映射 SAAS 主库 AppVirtualPosition 表）
+
+    应用在清单（AppManifest.VirtualPositions）中声明虚拟职务及其可见菜单（MenuNames），
+    安装后由管理员将系统实际职务绑定到虚拟职务（AppVirtualBinding），
+    用户经实际职务获得虚拟职务声明的菜单可见性。
+    """
+
+    AppVirtualPositionUUID = UUIDField(primary_key=True, db_column='AppVirtualPositionUUID', verbose_name='虚拟职务UUID')
+    AppUUID = UUIDField(db_column='AppUUID', verbose_name='应用UUID')
+    Code = models.CharField(max_length=64, db_column='Code', verbose_name='虚拟职务编码(应用内唯一)')
+    Name = models.CharField(max_length=128, db_column='Name', verbose_name='虚拟职务名称')
+    MenuNames = models.TextField(default='', db_column='MenuNames', verbose_name='可见菜单(Manifest菜单名,分号分隔)')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
+    CompanyUUID = UUIDField(null=True, blank=True, db_column='CompanyUUID', verbose_name='公司UUID')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'AppVirtualPosition'
+        unique_together = (('AppUUID', 'Code'),)
+        verbose_name = '应用虚拟职务'
+        verbose_name_plural = '应用虚拟职务'
+
+    def __str__(self):
+        return f'{self.AppUUID} → {self.Name}'
+
+
+class AppVirtualBinding(QModel):
+    """应用虚拟职务与实际职务绑定（映射 SAAS 主库 AppVirtualBinding 表）
+
+    拥有被绑定实际职务的用户，经此获得虚拟职务声明的应用菜单可见性。
+    """
+
+    AppVirtualBindingUUID = UUIDField(primary_key=True, db_column='AppVirtualBindingUUID', verbose_name='绑定UUID')
+    AppUUID = UUIDField(db_column='AppUUID', verbose_name='应用UUID')
+    VirtualPositionUUID = UUIDField(db_column='VirtualPositionUUID', verbose_name='虚拟职务UUID')
+    PositionUUID = UUIDField(db_column='PositionUUID', verbose_name='实际职务UUID')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
+    CompanyUUID = UUIDField(null=True, blank=True, db_column='CompanyUUID', verbose_name='公司UUID')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'AppVirtualBinding'
+        unique_together = (('VirtualPositionUUID', 'PositionUUID'),)
+        verbose_name = '应用虚拟职务绑定'
+        verbose_name_plural = '应用虚拟职务绑定'
+
+    def __str__(self):
+        return f'{self.VirtualPositionUUID} → {self.PositionUUID}'
 
 
 # === 菜单表 ===
