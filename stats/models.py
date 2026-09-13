@@ -180,7 +180,8 @@ class StatRanking(QModel):
         app_label = 'gvsdsdk'
         verbose_name = '排行榜'
         verbose_name_plural = '排行榜'
-        unique_together = [('TenantUUID', 'RankingPeriod', 'RankingDate', 'Metric', 'DimensionFilter', 'Rank')]
+        # 唯一约束不含 JSON 列 DimensionFilter：MySQL 不支持对 JSON 列建索引
+        unique_together = [('TenantUUID', 'RankingPeriod', 'RankingDate', 'Metric', 'Rank')]
         managed = False
         # 索引由业务侧（gvsds）迁移声明；SDK 为 managed=False 镜像，不重复声明（避免 models.E030）
 
