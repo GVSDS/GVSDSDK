@@ -653,11 +653,30 @@ class PersonalPage(QModel):
     Classification = models.CharField(max_length=256, default='', db_column='Classification', verbose_name='分类')
     Github = models.CharField(max_length=256, default='', db_column='Github', verbose_name='GitHub')
     Wechat = models.CharField(max_length=256, default='', db_column='Wechat', verbose_name='微信')
-    QQ = models.CharField(max_length=256, default='', db_column='QQ', verbose_name='QQ')
+    QQ = models.CharField(max_length=256, default='', db_column='Qq', verbose_name='QQ')
     SelfIntroduction = models.TextField(default='', db_column='SelfIntroduction', verbose_name='自我介绍')
     ProjectExperience = models.CharField(max_length=256, default='', db_column='ProjectExperience', verbose_name='项目经验')
     SatisfiedCustomers = models.CharField(max_length=256, default='', db_column='SatisfiedCustomers', verbose_name='满意客户')
     ReceiveAward = models.CharField(max_length=256, default='', db_column='ReceiveAward', verbose_name='获奖')
+    CoffeeCups = models.CharField(max_length=256, default='', db_column='CoffeeCups', verbose_name='咖啡杯数')
+    Achievement1Icon = models.CharField(max_length=256, default='', db_column='Achievement1Icon', verbose_name='成就1图标')
+    Achievement1Name = models.CharField(max_length=256, default='', db_column='Achievement1Name', verbose_name='成就1名称')
+    Achievement1Time = models.CharField(max_length=256, default='', db_column='Achievement1Time', verbose_name='成就1时间')
+    Achievement1Introduction = models.TextField(default='', db_column='Achievement1Introduction', verbose_name='成就1介绍')
+    Achievement2Icon = models.CharField(max_length=256, default='', db_column='Achievement2Icon', verbose_name='成就2图标')
+    Achievement2Name = models.CharField(max_length=256, default='', db_column='Achievement2Name', verbose_name='成就2名称')
+    Achievement2Time = models.CharField(max_length=256, default='', db_column='Achievement2Time', verbose_name='成就2时间')
+    Achievement2Introduction = models.TextField(default='', db_column='Achievement2Introduction', verbose_name='成就2介绍')
+    Achievement3Icon = models.CharField(max_length=256, default='', db_column='Achievement3Icon', verbose_name='成就3图标')
+    Achievement3Name = models.CharField(max_length=256, default='', db_column='Achievement3Name', verbose_name='成就3名称')
+    Achievement3Time = models.CharField(max_length=256, default='', db_column='Achievement3Time', verbose_name='成就3时间')
+    Achievement3Introduction = models.TextField(default='', db_column='Achievement3Introduction', verbose_name='成就3介绍')
+    Achievement4Icon = models.CharField(max_length=256, default='', db_column='Achievement4Icon', verbose_name='成就4图标')
+    Achievement4Name = models.CharField(max_length=256, default='', db_column='Achievement4Name', verbose_name='成就4名称')
+    Achievement4Time = models.CharField(max_length=256, default='', db_column='Achievement4Time', verbose_name='成就4时间')
+    Achievement4Introduction = models.TextField(default='', db_column='Achievement4Introduction', verbose_name='成就4介绍')
+    Tags = models.CharField(max_length=256, default='', db_column='Tags', verbose_name='标签')
+    Markdown = models.TextField(default='', db_column='Markdown', verbose_name='Markdown')
 
     class Meta:
         managed = False
@@ -670,7 +689,8 @@ class PersonalPage(QModel):
 class UserSettings(QModel):
     """用户设置表——存储每位用户的个性化系统设置（映射 SAAS 主库 UserSettings 表）"""
 
-    UserUUID = UUIDField(primary_key=True, db_column='UserUUID', verbose_name='用户UUID')
+    id = models.BigAutoField(primary_key=True, db_column='id', verbose_name='自增ID')
+    UserUUID = UUIDField(unique=True, db_column='UserUUID', verbose_name='用户UUID')
     SettingsData = models.TextField(default='', db_column='SettingsData', verbose_name='设置数据')
 
     class Meta:
@@ -1435,7 +1455,7 @@ class CompanyInfo(QModel):
     SocialSecurityBank = models.CharField(max_length=128, default='', db_column='SocialSecurityBank', verbose_name='社保银行')
     SocialSecurityAccount = models.CharField(max_length=64, default='', db_column='SocialSecurityAccount', verbose_name='社保账号')
     LegalPersonName = models.CharField(max_length=64, default='', db_column='LegalPersonName', verbose_name='法人姓名')
-    LegalPersonIDCard = models.CharField(max_length=32, default='', db_column='LegalPersonIDCard', verbose_name='法人身份证')
+    LegalPersonIDCard = models.CharField(max_length=32, default='', db_column='LegalPersonIdCard', verbose_name='法人身份证')
     LegalPersonGender = models.CharField(max_length=16, default='', db_column='LegalPersonGender', verbose_name='法人性别')
     LegalPersonBirthday = models.CharField(max_length=32, default='', db_column='LegalPersonBirthday', verbose_name='法人生日')
     LegalPersonNationality = models.CharField(max_length=32, default='', db_column='LegalPersonNationality', verbose_name='法人国籍')
@@ -1447,7 +1467,7 @@ class CompanyInfo(QModel):
     LegalPersonShareRatio = models.CharField(max_length=16, default='', db_column='LegalPersonShareRatio', verbose_name='法人持股比例')
     LegalPersonAppointment = models.CharField(max_length=32, default='', db_column='LegalPersonAppointment', verbose_name='法人任职')
     OperatorName = models.CharField(max_length=64, default='', db_column='OperatorName', verbose_name='经办人姓名')
-    OperatorIDCard = models.CharField(max_length=32, default='', db_column='OperatorIDCard', verbose_name='经办人身份证')
+    OperatorIDCard = models.CharField(max_length=32, default='', db_column='OperatorIdCard', verbose_name='经办人身份证')
     OperatorPhone = models.CharField(max_length=32, default='', db_column='OperatorPhone', verbose_name='经办人电话')
     OperatorEmail = models.CharField(max_length=128, default='', db_column='OperatorEmail', verbose_name='经办人邮箱')
     OperatorDepartment = models.CharField(max_length=128, default='', db_column='OperatorDepartment', verbose_name='经办人部门')
@@ -1455,7 +1475,7 @@ class CompanyInfo(QModel):
     FinanceManagerName = models.CharField(max_length=64, default='', db_column='FinanceManagerName', verbose_name='财务负责人')
     FinanceManagerPhone = models.CharField(max_length=32, default='', db_column='FinanceManagerPhone', verbose_name='财务电话')
     FinanceManagerEmail = models.CharField(max_length=128, default='', db_column='FinanceManagerEmail', verbose_name='财务邮箱')
-    FinanceManagerIDCard = models.CharField(max_length=32, default='', db_column='FinanceManagerIDCard', verbose_name='财务身份证')
+    FinanceManagerIDCard = models.CharField(max_length=32, default='', db_column='FinanceManagerIdCard', verbose_name='财务身份证')
     Remark = models.TextField(default='', db_column='Remark', verbose_name='备注')
     ReviewStatus = models.SmallIntegerField(default=0, db_column='ReviewStatus', verbose_name='审核状态')
     ReviewRemark = models.CharField(max_length=512, default='', db_column='ReviewRemark', verbose_name='审核备注')
