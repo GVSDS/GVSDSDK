@@ -620,7 +620,7 @@ class Message(QModel):
 # === 个人中心表 ===
 
 class UserIDCard(QModel):
-    """用户身份证表——实名信息（映射 SAAS 主库 UserIDCard 表）"""
+    """用户身份证表——实名信息（映射 SAAS 主库 IDCard 表；表名见 gerp.UserIDCard.db_table）"""
 
     UserUUID = UUIDField(primary_key=True, db_column='UserUUID', verbose_name='用户UUID')
     Name = models.CharField(max_length=128, db_column='Name', verbose_name='姓名')
@@ -634,11 +634,13 @@ class UserIDCard(QModel):
     CorrespondenceAddress = models.JSONField(default=list, db_column='CorrespondenceAddress', verbose_name='通讯地址')
     HeadImage = models.CharField(max_length=4096, default='', db_column='HeadImage', verbose_name='头像')
     InformationAboutFamilyMembers = models.JSONField(default=dict, db_column='InformationAboutFamilyMembers', verbose_name='家庭成员信息')
+    Appointments = models.JSONField(default=dict, db_column='Appointments', verbose_name='任职信息')
+    ReadmeReport = models.TextField(default='', db_column='ReadmeReport', verbose_name='自述报告')
 
     class Meta:
         managed = False
         app_label = 'gvsdsdk'
-        db_table = 'UserIDCard'
+        db_table = 'IDCard'
         verbose_name = '用户身份证'
         verbose_name_plural = '用户身份证'
 
