@@ -64,12 +64,7 @@ class CommissionEvent(QModel):
         verbose_name_plural = '分佣事件'
         unique_together = [('TenantUUID', 'EventKey')]
         managed = False
-        # managed=False：索引需手动创建，参见 SQL 脚本；以下 indexes 定义仅作文档参考
-        indexes = [
-            models.Index(fields=['TenantUUID', 'EventType', 'EventStatus'], name='idx_cmevt_tenant_type_status'),
-            models.Index(fields=['EventKey'], name='idx_cmevt_event_key'),
-            models.Index(fields=['CreateTime'], name='idx_cmevt_create_time'),
-        ]
+        # 索引由业务侧（gvsds）迁移声明；SDK 为 managed=False 镜像，不重复声明（避免 models.E030）
 
     def __str__(self):
         return f'{self.EventType}:{self.EventKey}'
@@ -116,10 +111,7 @@ class RateTable(QModel):
         verbose_name_plural = '费率表'
         unique_together = [('TenantUUID', 'TableCode')]
         managed = False
-        # managed=False：索引需手动创建，参见 SQL 脚本；以下 indexes 定义仅作文档参考
-        indexes = [
-            models.Index(fields=['TenantUUID'], name='idx_cmrate_tenant'),
-        ]
+        # 索引由业务侧（gvsds）迁移声明；SDK 为 managed=False 镜像，不重复声明（避免 models.E030）
 
     def __str__(self):
         return f'{self.TableCode}:{self.TableName}'
@@ -159,10 +151,7 @@ class RateEntry(QModel):
         verbose_name_plural = '费率条目'
         unique_together = [('Table', 'RateKey')]
         managed = False
-        # managed=False：索引需手动创建，参见 SQL 脚本；以下 indexes 定义仅作文档参考
-        indexes = [
-            models.Index(fields=['Table', 'RateKey'], name='idx_cmrentry_table_key'),
-        ]
+        # 索引由业务侧（gvsds）迁移声明；SDK 为 managed=False 镜像，不重复声明（避免 models.E030）
 
     def __str__(self):
         return f'{self.RateKey}={self.RateValue}'
@@ -209,11 +198,7 @@ class CommissionRule(QModel):
         verbose_name = '分佣规则'
         verbose_name_plural = '分佣规则'
         managed = False
-        # managed=False：索引需手动创建，参见 SQL 脚本；以下 indexes 定义仅作文档参考
-        indexes = [
-            models.Index(fields=['TenantUUID', 'EventType', 'RuleStatus'], name='idx_cmrule_tenant_type_status'),
-            models.Index(fields=['RulePriority'], name='idx_cmrule_priority'),
-        ]
+        # 索引由业务侧（gvsds）迁移声明；SDK 为 managed=False 镜像，不重复声明（避免 models.E030）
 
     def __str__(self):
         return f'{self.RuleName}({self.EventType})'
@@ -272,12 +257,7 @@ class CommissionRecord(QModel):
         verbose_name_plural = '分佣记录'
         ordering = ['-CreateTime']
         managed = False
-        # managed=False：索引需手动创建，参见 SQL 脚本；以下 indexes 定义仅作文档参考
-        indexes = [
-            models.Index(fields=['TenantUUID', 'ParticipantID', 'Status'], name='idx_cmrec_tenant_part_status'),
-            models.Index(fields=['Event'], name='idx_cmrec_event'),
-            models.Index(fields=['CreateTime'], name='idx_cmrec_create_time'),
-        ]
+        # 索引由业务侧（gvsds）迁移声明；SDK 为 managed=False 镜像，不重复声明（避免 models.E030）
 
     def __str__(self):
         return f'{self.ParticipantRole}:{self.ParticipantID}={self.Amount}'
@@ -337,12 +317,7 @@ class PreSettlement(QModel):
         verbose_name_plural = '预结算'
         unique_together = [('EventKey', 'ParticipantID')]
         managed = False
-        # managed=False：索引需手动创建，参见 SQL 脚本；以下 indexes 定义仅作文档参考
-        indexes = [
-            models.Index(fields=['TenantUUID', 'Status'], name='idx_cmpst_tenant_status'),
-            models.Index(fields=['EventKey'], name='idx_cmpst_event_key'),
-            models.Index(fields=['ExternalOrderID'], name='idx_cmpst_ext_order'),
-        ]
+        # 索引由业务侧（gvsds）迁移声明；SDK 为 managed=False 镜像，不重复声明（避免 models.E030）
 
     def __str__(self):
         return f'预结算:{self.EventKey}->{self.ParticipantID}={self.Amount}'

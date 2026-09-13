@@ -338,6 +338,22 @@ class StatsManager:
             qs = qs.filter(ConfigStatus=status)
         return qs
 
+    @staticmethod
+    def ListAutoResetConfigs(tenant_uuid, status=1):
+        """列出租户下启用"自动重置"的统计配置（供周期清零任务使用）
+
+        Args:
+            tenant_uuid: 租户 UUID
+            status: 配置状态过滤（默认 1=启用；传 None 则不过滤）
+
+        Returns:
+            QuerySet[StatConfig]
+        """
+        qs = StatConfig.objects.filter(TenantUUID=tenant_uuid, AutoReset=True)
+        if status is not None:
+            qs = qs.filter(ConfigStatus=status)
+        return qs
+
     # ---------- 编排层（SAAS 主服务器视图 / Celery 任务入口） ----------
 
     @staticmethod

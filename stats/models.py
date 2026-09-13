@@ -57,9 +57,7 @@ class StatMetric(QModel):
         verbose_name_plural = '统计指标'
         unique_together = [('TenantUUID', 'MetricCode')]
         managed = False
-        indexes = [
-            models.Index(fields=['TenantUUID', 'MetricStatus'], name='idx_statmet_tenant_status'),
-        ]
+        # 索引由业务侧（gvsds）迁移声明；SDK 为 managed=False 镜像，不重复声明（避免 models.E030）
 
     def __str__(self):
         return f'{self.MetricCode}:{self.MetricName}'
@@ -138,11 +136,7 @@ class StatRecord(QModel):
         verbose_name_plural = '统计记录'
         unique_together = [('TenantUUID', 'PeriodType', 'PeriodKey', 'Metric', 'DimensionValues')]
         managed = False
-        indexes = [
-            models.Index(fields=['TenantUUID', 'PeriodType', 'PeriodKey'], name='idx_statreq_tenant_period'),
-            models.Index(fields=['Metric', 'PeriodKey'], name='idx_statreq_metric_period'),
-            models.Index(fields=['CreateTime'], name='idx_statreq_create_time'),
-        ]
+        # 索引由业务侧（gvsds）迁移声明；SDK 为 managed=False 镜像，不重复声明（避免 models.E030）
 
     def __str__(self):
         dim_str = ','.join(f'{k}={v}' for k, v in self.DimensionValues.items())
@@ -188,10 +182,7 @@ class StatRanking(QModel):
         verbose_name_plural = '排行榜'
         unique_together = [('TenantUUID', 'RankingPeriod', 'RankingDate', 'Metric', 'DimensionFilter', 'Rank')]
         managed = False
-        indexes = [
-            models.Index(fields=['TenantUUID', 'RankingPeriod', 'RankingDate', 'Metric'], name='idx_statrnk_composite'),
-            models.Index(fields=['TargetID', 'RankingPeriod'], name='idx_statrnk_target'),
-        ]
+        # 索引由业务侧（gvsds）迁移声明；SDK 为 managed=False 镜像，不重复声明（避免 models.E030）
 
     def __str__(self):
         return f'{self.RankingDate} {self.RankingPeriod} #{self.Rank} {self.TargetID}'

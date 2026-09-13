@@ -1559,12 +1559,7 @@ class CashReceiptsPaymentsLedger(QModel):
         db_table = 'CashBook'
         verbose_name = '现金收支台账'
         verbose_name_plural = '现金收支台账'
-        indexes = [
-            models.Index(fields=['CashBookTransactionTime'], name='idx_transaction_time'),
-            models.Index(fields=['CashBookTransactionType'], name='idx_transaction_type'),
-            models.Index(fields=['CashBookStatus'], name='idx_status'),
-            models.Index(fields=['CashBookCategory'], name='idx_category'),
-        ]
+        # 索引由业务侧（gvsds）迁移声明；SDK 为 managed=False 镜像，不重复声明（避免 models.E030）
 
 
 class Asset(QModel):
@@ -1607,3 +1602,145 @@ class Liability(QModel):
         db_table = 'Liability'
         verbose_name = '负债'
         verbose_name_plural = '负债'
+
+
+# === 应用体系（应用市场 / 安装授权 / 应用配置） ===
+
+class App(QModel):
+    """应用/功能注册表——企业功能与个人应用的统一实体（映射 SAAS 主库 App 表）
+
+    投放形态 AppType：enterprise（企业功能）/ personal（个人应用）/ both（混合）；
+    AuthRequired=1 时个人使用须经租户管理员审批（UserApp.ApplyStatus 状态机）。
+    """
+
+    AppUUID = UUIDField(primary_key=True, db_column='AppUUID', verbose_name='应用UUID')
+    AppCode = models.CharField(max_length=64, unique=True, db_column='AppCode', verbose_name='应用编码')
+    AppName = models.CharField(max_length=128, db_column='AppName', verbose_name='应用名称')
+    AppIcon = models.CharField(max_length=256, default='', db_column='AppIcon', verbose_name='应用图标')
+    AppDesc = models.TextField(default='', db_column='AppDesc', verbose_name='应用描述')
+    AppType = models.CharField(max_length=16, default='both', db_column='AppType', verbose_name='投放形态')
+    AuthRequired = models.SmallIntegerField(default=0, db_column='AuthRequired', verbose_name='是否需企业授权(0/1)')
+    MenuRootUUID = UUIDField(null=True, blank=True, db_column='MenuRootUUID', verbose_name='关联菜单根UUID')
+    DefaultPerms = models.TextField(default='', db_column='DefaultPerms', verbose_name='默认权限码集(;分隔)')
+    FrontendRoute = models.CharField(max_length=256, default='', db_column='FrontendRoute', verbose_name='前端路由')
+    FrontendType = models.CharField(max_length=16, default='vue', db_column='FrontendType', verbose_name='前端类型(vue/legacy)')
+    LegacySrc = models.CharField(max_length=256, default='', db_column='LegacySrc', verbose_name='旧版页面路径')
+    AppSort = models.IntegerField(default=0, db_column='AppSort', verbose_name='排序')
+    AppStatus = models.SmallIntegerField(default=1, db_column='AppStatus', verbose_name='状态(1启用/0禁用)')
+    StrictPositionVisible = models.SmallIntegerField(default=0, db_column='StrictPositionVisible', verbose_name='严格职务可见(0宽松/1严格)')
+    RequirePositionBinding = models.SmallIntegerField(default=0, db_column='RequirePositionBinding', verbose_name='强制职务绑定(0/1)')
+    Source = models.CharField(max_length=16, default='local', db_column='Source', verbose_name='来源(local/msync)')
+    ServiceName = models.CharField(max_length=128, default='', blank=True, db_column='ServiceName', verbose_name='提供方服务名')
+    ServiceDomain = models.CharField(max_length=256, default='', blank=True, db_column='ServiceDomain', verbose_name='提供方服务域名')
+    ServiceOnline = models.SmallIntegerField(default=1, db_column='ServiceOnline', verbose_name='提供方服务在线(1在线/0离线)')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'App'
+        ordering = ['AppSort', 'CreateTime']
+        verbose_name = '应用/功能'
+        verbose_name_plural = '应用/功能'
+
+    def __str__(self):
+        return self.AppName
+
+
+class TenantApp(QModel):
+    """企业安装/授权（租户维度）——租户与应用的关系（映射 SAAS 主库 TenantApp 表）
+
+    InstallStatus：1=已安装(启用) / 0=已停用
+    AuthStatus   ：0=未授权 / 1=已授权 / 2=已拒绝
+    """
+
+    TenantAppUUID = UUIDField(primary_key=True, db_column='TenantAppUUID', verbose_name='企业安装记录UUID')
+    TenantUUID = UUIDField(db_column='TenantUUID', verbose_name='租户UUID')
+    AppUUID = UUIDField(db_column='AppUUID', verbose_name='应用UUID')
+    InstallStatus = models.SmallIntegerField(default=1, db_column='InstallStatus', verbose_name='安装状态(1启用/0停用)')
+    AuthStatus = models.SmallIntegerField(default=0, db_column='AuthStatus', verbose_name='企业授权状态(0/1/2)')
+    InstallTime = models.DateTimeField(default=_UtcNow, db_column='InstallTime', verbose_name='安装时间')
+    AuthBy = UUIDField(null=True, blank=True, db_column='AuthBy', verbose_name='企业授权人UUID')
+    AuthTime = models.DateTimeField(null=True, blank=True, db_column='AuthTime', verbose_name='企业授权时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'TenantApp'
+        unique_together = (('TenantUUID', 'AppUUID'),)
+        verbose_name = '企业应用安装'
+        verbose_name_plural = '企业应用安装'
+
+
+class CompanyApp(QModel):
+    """企业应用安装（公司维度）——指定公司安装（映射 SAAS 主库 CompanyApp 表）
+
+    与 TenantApp 互补：TenantApp=全租户安装，CompanyApp=指定公司安装；
+    企业功能可用判定：租户已装 或 当前公司已装。
+    """
+
+    CompanyAppUUID = UUIDField(primary_key=True, db_column='CompanyAppUUID', verbose_name='公司安装记录UUID')
+    TenantUUID = UUIDField(null=True, blank=True, db_column='TenantUUID', verbose_name='租户UUID')
+    CompanyUUID = UUIDField(db_column='CompanyUUID', verbose_name='公司UUID')
+    AppUUID = UUIDField(db_column='AppUUID', verbose_name='应用UUID')
+    InstallStatus = models.SmallIntegerField(default=1, db_column='InstallStatus', verbose_name='安装状态(1启用/0停用)')
+    InstallTime = models.DateTimeField(default=_UtcNow, db_column='InstallTime', verbose_name='安装时间')
+    InstallBy = UUIDField(null=True, blank=True, db_column='InstallBy', verbose_name='安装人UUID')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'CompanyApp'
+        unique_together = (('CompanyUUID', 'AppUUID'),)
+        verbose_name = '企业应用安装（公司维度）'
+        verbose_name_plural = '企业应用安装（公司维度）'
+
+
+class UserApp(QModel):
+    """个人应用启用/申请——用户与应用的关系（映射 SAAS 主库 UserApp 表）
+
+    UseStatus  ：1=已启用 / 0=已停用
+    ApplyStatus：0=未申请 / 1=申请中 / 2=已授权 / 3=已拒绝
+    """
+
+    UserAppUUID = UUIDField(primary_key=True, db_column='UserAppUUID', verbose_name='个人应用记录UUID')
+    UserUUID = UUIDField(db_column='UserUUID', verbose_name='用户UUID')
+    AppUUID = UUIDField(db_column='AppUUID', verbose_name='应用UUID')
+    UseStatus = models.SmallIntegerField(default=1, db_column='UseStatus', verbose_name='使用状态(1启用/0停用)')
+    ApplyStatus = models.SmallIntegerField(default=0, db_column='ApplyStatus', verbose_name='授权申请状态(0/1/2/3)')
+    ApplyTime = models.DateTimeField(null=True, blank=True, db_column='ApplyTime', verbose_name='申请时间')
+    ApproveBy = UUIDField(null=True, blank=True, db_column='ApproveBy', verbose_name='审批人UUID')
+    ApproveTime = models.DateTimeField(null=True, blank=True, db_column='ApproveTime', verbose_name='审批时间')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'UserApp'
+        unique_together = (('UserUUID', 'AppUUID'),)
+        verbose_name = '个人应用'
+        verbose_name_plural = '个人应用'
+
+
+class AppConfig(QModel):
+    """应用配置键值表——按租户+公司隔离的应用运行参数（映射 SAAS 主库 AppConfig 表）
+
+    CompanyUUID 为空 → 租户级默认配置；有值 → 公司级配置（覆盖租户默认）。
+    """
+
+    AppConfigUUID = UUIDField(primary_key=True, db_column='AppConfigUUID', verbose_name='应用配置UUID')
+    TenantUUID = UUIDField(db_column='TenantUUID', verbose_name='租户UUID')
+    CompanyUUID = UUIDField(null=True, blank=True, db_column='CompanyUUID', verbose_name='公司UUID（空=租户级默认）')
+    AppUUID = UUIDField(db_column='AppUUID', verbose_name='应用UUID')
+    ConfigKey = models.CharField(max_length=128, db_column='ConfigKey', verbose_name='配置键名')
+    ConfigValue = models.TextField(default='', db_column='ConfigValue', verbose_name='配置值')
+    UpdateBy = UUIDField(null=True, blank=True, db_column='UpdateBy', verbose_name='更新人UUID')
+    UpdateTime = models.DateTimeField(null=True, blank=True, db_column='UpdateTime', verbose_name='更新时间')
+    CreateTime = models.DateTimeField(default=_UtcNow, db_column='CreateTime', verbose_name='创建时间')
+
+    class Meta:
+        managed = False
+        app_label = 'gvsdsdk'
+        db_table = 'AppConfig'
+        verbose_name = '应用配置'
+        verbose_name_plural = '应用配置'

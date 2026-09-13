@@ -40,6 +40,20 @@ class UUIDObj:
     def uuid(self):
         return self._raw
 
+    # ── PascalCase 别名（兼容旧 gvsds.common.UUID 的 Str/Bytes/UUID 属性） ──
+
+    @property
+    def Str(self):
+        return self.str
+
+    @property
+    def Bytes(self):
+        return self.bytes
+
+    @property
+    def UUID(self):
+        return self._raw
+
     def __str__(self):
         return self.str or ''
 
@@ -86,3 +100,40 @@ def _GetUserModel():
         except LookupError:
             continue
     raise LookupError("未找到 User 模型，请在业务子项目中定义 User 子类")
+
+
+# ── UUID 便捷函数（兼容旧 gvsds.common.UUID 的模块级 API） ──
+
+def NewUUID():
+    """生成随机 UUIDObj"""
+    return UUIDObj(uuid.uuid4())
+
+
+def NewUUIDBytes():
+    """生成随机 UUID 的 16 字节形式"""
+    return uuid.uuid4().bytes
+
+
+def NewUUIDStr():
+    """生成随机 UUID 字符串"""
+    return str(uuid.uuid4())
+
+
+def UUIDToBytes(value):
+    """任意 UUID 表示 → 16 字节"""
+    return UUIDObj(value).bytes
+
+
+def UUIDToStr(value):
+    """任意 UUID 表示 → 字符串"""
+    return UUIDObj(value).str
+
+
+def BytesToUUIDStr(value):
+    """16 字节 → UUID 字符串"""
+    return str(uuid.UUID(bytes=value))
+
+
+def StrToUUIDBytes(value):
+    """UUID 字符串 → 16 字节"""
+    return uuid.UUID(value).bytes

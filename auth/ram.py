@@ -229,6 +229,24 @@ class RAMManager:
             qs = qs.filter(_CompanyScopeQ(_ToBytes(CompanyUUID)))
         return list(qs.values_list('ResourceUUID', flat=True))
 
+    @staticmethod
+    def ListPolicyResourceUUIDs(ResourceType, Action, TenantUUID=None, CompanyUUID=None):
+        """列出某类资源/操作下"已配置策略"的资源 UUID 集合（bytes 列表）
+
+        与 ListResourcesForPrincipal 的区别：不限定主体，返回整体策略集合，
+        供应用/菜单可见性判定"是否启用了 RAM 策略"（无策略=向后兼容全员可见）。
+        """
+        qs = RAMGrant.objects.filter(
+            ResourceType=ResourceType,
+            Action=Action,
+            GrantStatus=1,
+        )
+        if TenantUUID is not None:
+            qs = qs.filter(_TenantScopeQ(_ToBytes(TenantUUID)))
+        if CompanyUUID is not None:
+            qs = qs.filter(_CompanyScopeQ(_ToBytes(CompanyUUID)))
+        return list(qs.values_list('ResourceUUID', flat=True))
+
     # ==================== 内部 ====================
 
     @staticmethod

@@ -1,8 +1,9 @@
+import datetime
 import uuid
 from django.db.models import Q
 from django.utils import timezone as _timezone
 
-from gvsdsdk.models import Role, UserRole, UserRoleDepartment, UserRoleDepartmentPosition, UserRoleWorkgroup, RolePermission, Permission, Position, PositionCategory, PositionTemplate, PositionTemplatePermission, AppPosition, AppVirtualPosition, AppVirtualBinding, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, Message, Menu, WorkOrder, AuditLog, ItemReference, Backpack, FileAsset
+from gvsdsdk.models import Role, UserRole, UserRoleDepartment, UserRoleDepartmentPosition, UserRoleWorkgroup, RolePermission, Permission, Position, PositionCategory, PositionTemplate, PositionTemplatePermission, AppPosition, AppVirtualPosition, AppVirtualBinding, App, TenantApp, CompanyApp, UserApp, AppConfig, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, DepartmentSMTM, Message, Menu, WorkOrder, AuditLog, ItemReference, Backpack, FileAsset, CompanyInfo
 from gvsdsdk.auth.crypto import HashPassword, VerifyPassword
 from gvsdsdk.model_utils import _GetUserModel, UUIDObj
 
@@ -660,6 +661,184 @@ class RoleManager:
             )
         return role
 
+    @staticmethod
+    def GetUserCompanyUUIDs(UserUUID):
+        """获取用户关联的公司 UUID 列表（经 UserRole，去重）
+
+        Args:
+            UserUUID: 用户 UUID（bytes/str/UUIDObj 均可）
+
+        Returns:
+            list[bytes]：CompanyUUID 列表（去重，保持首次出现顺序）
+        """
+        rows = UserRole.objects.filter(
+            UserUUID=UUIDObj(UserUUID).bytes
+        ).values_list('CompanyUUID', flat=True)
+        result = []
+        for c in rows:
+            if c and c not in result:
+                result.append(c)
+        return result
+
+    @staticmethod
+    def ListUserRoleUUIDs(UserUUID, CompanyUUID=None):
+        """获取用户的"用户-角色"关联 UUID 列表（UserRoleUUID）
+
+        Args:
+            UserUUID: 用户 UUID（bytes/str/UUIDObj 均可）
+            CompanyUUID: 可选，限定公司范围
+
+        Returns:
+            list[bytes]：UserRoleUUID 列表
+        """
+        qs = UserRole.objects.filter(UserUUID=UUIDObj(UserUUID).bytes)
+        if CompanyUUID is not None:
+            qs = qs.filter(CompanyUUID=UUIDObj(CompanyUUID).bytes)
+        return list(qs.values_list('UserRoleUUID', flat=True))
+
+    @staticmethod
+    def GetRolesForTenant(TenantUUID, RoleStatus=None):
+        """获取租户下的角色列表（按角色名排序）
+
+        Args:
+            TenantUUID: 租户 UUID（bytes/str/UUIDObj 均可）
+            RoleStatus: 可选，角色状态过滤（如 1=启用）
+
+        Returns:
+            QuerySet[Role]
+        """
+        qs = Role.objects.filter(TenantUUID=UUIDObj(TenantUUID).bytes)
+        if RoleStatus is not None:
+            qs = qs.filter(RoleStatus=RoleStatus)
+        return qs.order_by('RoleName')
+
+    @staticmethod
+    def GetRoleNameMap(RoleUUIDs):
+        """批量获取 RoleUUID(bytes) → RoleName 映射（仅含存在的角色）
+
+        Args:
+            RoleUUIDs: UUID 集合（bytes/str/UUIDObj 混合均可）
+
+        Returns:
+            dict[bytes, str]：键为 UUID 的 16 字节形式，与调用方字节键对齐
+        """
+        uuids = [UUIDObj(u).bytes for u in (RoleUUIDs or []) if u]
+        if not uuids:
+            return {}
+        result = {}
+        for r in Role.objects.filter(RoleUUID__in=uuids):
+            try:
+                result[r.RoleUUID.bytes] = r.RoleName
+            except AttributeError:
+                result[UUIDObj(r.RoleUUID).bytes] = r.RoleName
+        return result
+
+    @staticmethod
+    def GetUserRoleDepartmentsForUserRoles(UserRoleUUIDs, CompanyUUID=None):
+        """批量获取多个"用户-角色"关联的部门归属行
+
+        Args:
+            UserRoleUUIDs: UserRoleUUID 集合
+            CompanyUUID: 可选，限定公司范围
+
+        Returns:
+            list[UserRoleDepartment]
+        """
+        uuids = [UUIDObj(u).bytes for u in (UserRoleUUIDs or []) if u]
+        if not uuids:
+            return []
+        qs = UserRoleDepartment.objects.filter(UserRoleUUID__in=uuids)
+        if CompanyUUID is not None:
+            qs = qs.filter(CompanyUUID=UUIDObj(CompanyUUID).bytes)
+        return list(qs)
+
+    @staticmethod
+    def GetPermissionByUUID(PermUUID):
+        """按 UUID 查询权限（不存在返回 None）"""
+        if not PermUUID:
+            return None
+        return Permission.objects.filter(PermUUID=UUIDObj(PermUUID).bytes).first()
+
+    @staticmethod
+    def GetRolePermission(RoleUUID, PermUUID, CompanyUUID=None, MatchNull=False):
+        """查询角色-权限关联行（不存在返回 None）
+
+        Args:
+            RoleUUID: 角色 UUID
+            PermUUID: 权限 UUID
+            CompanyUUID: 可选，限定公司范围
+            MatchNull: CompanyUUID 为 None 时是否视为 ``IS NULL`` 精确匹配
+                （默认 False = 不做公司过滤；True 用于"公司为空"的唯一性校验）
+
+        Returns:
+            RolePermission 实例或 None
+        """
+        qs = RolePermission.objects.filter(
+            RoleUUID=UUIDObj(RoleUUID).bytes,
+            PermUUID=UUIDObj(PermUUID).bytes,
+        )
+        if MatchNull:
+            qs = qs.filter(
+                CompanyUUID=UUIDObj(CompanyUUID).bytes if CompanyUUID is not None else None
+            )
+        elif CompanyUUID is not None:
+            qs = qs.filter(CompanyUUID=UUIDObj(CompanyUUID).bytes)
+        return qs.first()
+
+    @staticmethod
+    def GetRolePermissionCompanies(RoleUUID, PermCode):
+        """获取角色在指定权限码下被授权的公司 UUID 列表
+
+        链路：Permission(PermCode) → RolePermission(RoleUUID) 的 CompanyUUID，
+        用于 admin:company 范围解析。空 UUID（b'\\x00'*16）被过滤。
+
+        Args:
+            RoleUUID: 角色 UUID
+            PermCode: 权限键（如 'admin:company'）
+
+        Returns:
+            list[bytes]：去重前的公司 UUID 列表
+        """
+        perm_uuids = list(Permission.objects.filter(
+            PermCode=PermCode, PermStatus=1,
+        ).values_list('PermUUID', flat=True))
+        if not perm_uuids:
+            return []
+        companies = []
+        for rp in RolePermission.objects.filter(
+                RoleUUID=UUIDObj(RoleUUID).bytes, PermUUID__in=perm_uuids):
+            if rp.CompanyUUID and rp.CompanyUUID != b'\x00' * 16:
+                companies.append(UUIDObj(rp.CompanyUUID).bytes)
+        return companies
+
+    @staticmethod
+    def RemoveUserRoleRelations(UserRoleUUID):
+        """删除"用户-角色"关联下的部门/工作组归属（含职务子表），防孤儿数据
+
+        与 gvsds FormService.delete_record 的 UserRole 级联清理零行为差异：
+        先清空各 UserRoleDepartment 的职务子表，再删 URD / URW 行。
+
+        Args:
+            UserRoleUUID: UserRoleUUID（bytes/str/UUIDObj 均可）
+
+        Returns:
+            dict：{'Departments': n, 'Workgroups': m, 'Positions': k}
+        """
+        if not UserRoleUUID:
+            return {'Departments': 0, 'Workgroups': 0, 'Positions': 0}
+        ur_bytes = UUIDObj(UserRoleUUID).bytes
+        position_count = 0
+        urds = list(UserRoleDepartment.objects.filter(UserRoleUUID=ur_bytes))
+        for urd in urds:
+            position_count += PositionManager.ClearUrdPositions(urd.UserRoleDepartmentUUID) or 0
+        dept_deleted, _ = UserRoleDepartment.objects.filter(UserRoleUUID=ur_bytes).delete()
+        wg_deleted, _ = UserRoleWorkgroup.objects.filter(UserRoleUUID=ur_bytes).delete()
+        return {
+            'Departments': dept_deleted,
+            'Workgroups': wg_deleted,
+            'Positions': position_count,
+        }
+
 
 class PositionManager:
     """职务管理器——提供人事职务标签创建、岗位模板管理"""
@@ -668,7 +847,12 @@ class PositionManager:
 
     @staticmethod
     def CreatePosition(Name, TenantUUID, Code='', Level=0, **Kwargs):
-        """创建人事职务标签（TenantUUID 传 UUIDObj/str/bytes）"""
+        """创建人事职务标签（TenantUUID 传 UUIDObj/str/bytes）
+
+        Kwargs:
+            PositionDesc: 职务描述
+            CategoryUUID: 可选，挂靠的通用部门（PositionCategory）
+        """
         position = Position(
             PositionUUID=uuid.uuid4().bytes,
             TenantUUID=TenantUUID,
@@ -677,6 +861,7 @@ class PositionManager:
             PositionLevel=Level,
             PositionStatus=1,
             PositionDesc=Kwargs.get('PositionDesc', ''),
+            CategoryUUID=Kwargs.get('CategoryUUID'),
             CreateTime=_timezone.now(),
             UpdateTime=_timezone.now(),
         )
@@ -687,6 +872,60 @@ class PositionManager:
     def GetPositionsForTenant(TenantUUID):
         """获取租户下的所有启用职务"""
         return Position.objects.filter(TenantUUID=TenantUUID, PositionStatus=1)
+
+    @staticmethod
+    def ListPositions(TenantUUID, Names=None, CategoryUUID=None, OrderByName=False):
+        """列出租户下的职务（不过滤状态；可按名称集合 / 通用部门过滤）
+
+        Args:
+            TenantUUID: 租户 UUID（bytes/str/UUIDObj 均可）
+            Names: 可选，职务名称集合（PositionName__in）
+            CategoryUUID: 可选，限定通用部门
+            OrderByName: True 时按 PositionName 排序
+
+        Returns:
+            QuerySet[Position]
+        """
+        tenant_bytes = PositionManager._ToBytes(TenantUUID)
+        if tenant_bytes is None:
+            return Position.objects.none()
+        qs = Position.objects.filter(TenantUUID=tenant_bytes)
+        if Names:
+            qs = qs.filter(PositionName__in=list(Names))
+        if CategoryUUID:
+            cat_bytes = PositionManager._ToBytes(CategoryUUID)
+            if cat_bytes is not None:
+                qs = qs.filter(CategoryUUID=cat_bytes)
+        if OrderByName:
+            qs = qs.order_by('PositionName')
+        return qs
+
+    @staticmethod
+    def ListPositionCodes(TenantUUID, CategoryUUID=None, Prefix=''):
+        """获取职务编码列表（可按通用部门 / 编码前缀过滤）
+
+        供职务编码自动编号使用：如通用部门编码 FIN → 已有 FIN01/FIN02，
+        调用方取回编码列表后计算下一序号。
+
+        Args:
+            TenantUUID: 租户 UUID（bytes/str/UUIDObj 均可）
+            CategoryUUID: 可选，限定通用部门（PositionCategory）
+            Prefix: 可选，编码前缀过滤（PositionCode__startswith）
+
+        Returns:
+            list[str]：职务编码列表（可能含空值）
+        """
+        tenant_bytes = PositionManager._ToBytes(TenantUUID)
+        if tenant_bytes is None:
+            return []
+        qs = Position.objects.filter(TenantUUID=tenant_bytes)
+        if CategoryUUID:
+            cat_bytes = PositionManager._ToBytes(CategoryUUID)
+            if cat_bytes is not None:
+                qs = qs.filter(CategoryUUID=cat_bytes)
+        if Prefix:
+            qs = qs.filter(PositionCode__startswith=Prefix)
+        return list(qs.values_list('PositionCode', flat=True))
 
     @staticmethod
     def GetPositionByUUID(PositionUUID):
@@ -707,7 +946,7 @@ class PositionManager:
         position = Position.objects.filter(PositionUUID=PositionUUID).first()
         if not position:
             return None
-        allowed = ('PositionName', 'PositionCode', 'PositionLevel', 'PositionStatus', 'PositionDesc')
+        allowed = ('PositionName', 'PositionCode', 'PositionLevel', 'PositionStatus', 'PositionDesc', 'CategoryUUID')
         update_fields = []
         for key, value in Fields.items():
             if key in allowed:
@@ -728,6 +967,18 @@ class PositionManager:
         position.PositionStatus = 0
         position.UpdateTime = _timezone.now()
         position.save(update_fields=['PositionStatus', 'UpdateTime'])
+        return True
+
+    @staticmethod
+    def PurgePosition(PositionUUID):
+        """物理删除职务（供应用模板移除等场景）；返回是否命中
+
+        注意：与 DeletePosition（软删除）语义不同，仅当确认无员工持有时调用。
+        """
+        position = Position.objects.filter(PositionUUID=PositionUUID).first()
+        if not position:
+            return False
+        position.delete()
         return True
 
     # ── 岗位模板 ──
@@ -860,9 +1111,23 @@ class PositionManager:
         return cat
 
     @staticmethod
-    def GetCategoriesForTenant(TenantUUID):
-        """获取租户下全部通用部门（含禁用，用于目录展示/搜索）"""
-        return PositionCategory.objects.filter(TenantUUID=TenantUUID)
+    def GetCategoriesForTenant(TenantUUID, Names=None):
+        """获取租户下全部通用部门（含禁用，用于目录展示/搜索）
+
+        Args:
+            TenantUUID: 租户 UUID（bytes/str/UUIDObj 均可）
+            Names: 可选，部门名称集合（CategoryName__in）
+
+        Returns:
+            QuerySet[PositionCategory]
+        """
+        tenant_bytes = PositionManager._ToBytes(TenantUUID)
+        if tenant_bytes is None:
+            return PositionCategory.objects.none()
+        qs = PositionCategory.objects.filter(TenantUUID=tenant_bytes)
+        if Names:
+            qs = qs.filter(CategoryName__in=list(Names))
+        return qs
 
     @staticmethod
     def GetCategoryByUUID(CategoryUUID):
@@ -902,6 +1167,18 @@ class PositionManager:
         cat.save(update_fields=['CategoryStatus', 'UpdateTime'])
         return True
 
+    @staticmethod
+    def PurgeCategory(CategoryUUID):
+        """物理删除通用部门（供应用模板移除等场景）；返回是否命中
+
+        注意：与 DeleteCategory（软删除）语义不同，仅当确认其下已无职务时调用。
+        """
+        cat = PositionCategory.objects.filter(PositionCategoryUUID=CategoryUUID).first()
+        if not cat:
+            return False
+        cat.delete()
+        return True
+
     # ── 部门职务多值子表（UserRoleDepartmentPosition） ────────
 
     @staticmethod
@@ -927,6 +1204,18 @@ class PositionManager:
                 UserRoleDepartmentUUID=UserRoleDepartmentUUID
             ).values_list('PositionUUID', flat=True)
         )
+
+    @staticmethod
+    def GetHeldPositionUUIDs():
+        """所有员工当前持有的职务 UUID bytes 集合（UserRoleDepartmentPosition 引用）
+
+        用于职务模板移除前的占用校验（被持有的职务不可删除）。
+        """
+        return {
+            PositionManager._ToBytes(r.PositionUUID)
+            for r in UserRoleDepartmentPosition.objects.all()
+            if r.PositionUUID
+        }
 
     @staticmethod
     def HasUrdPosition(UserRoleDepartmentUUID, PositionUUID):
@@ -1298,6 +1587,111 @@ class PositionManager:
         if unmatched:
             msg += f'；{len(unmatched)} 个未绑定：{"、".join(unmatched)}（请先同步职务模板或检查名称）'
         return True, msg, stats
+
+
+    @staticmethod
+    def ListVirtualPositions(AppUUID=None, TenantUUID=None, CompanyUUID=None):
+        """应用虚拟职务列表（按 Code 排序；可按应用/租户/公司过滤）"""
+        qs = AppVirtualPosition.objects.all()
+        app_bytes = PositionManager._ToBytes(AppUUID)
+        if app_bytes:
+            qs = qs.filter(AppUUID=app_bytes)
+        tenant_bytes = PositionManager._ToBytes(TenantUUID)
+        if tenant_bytes:
+            qs = qs.filter(TenantUUID=tenant_bytes)
+        company_bytes = PositionManager._ToBytes(CompanyUUID)
+        if company_bytes:
+            qs = qs.filter(CompanyUUID=company_bytes)
+        return list(qs.order_by('Code'))
+
+    @staticmethod
+    def UpsertVirtualPosition(AppUUID, Code, Name, MenuNames, TenantUUID=None, CompanyUUID=None):
+        """按 (AppUUID, Code) upsert 应用虚拟职务（无记录则补主键新建），返回实例"""
+        app_bytes = PositionManager._ToBytes(AppUUID)
+        avp = AppVirtualPosition.objects.filter(AppUUID=app_bytes, Code=Code).first()
+        if avp is None:
+            return AppVirtualPosition.objects.create(
+                AppVirtualPositionUUID=uuid.uuid4().bytes,
+                AppUUID=app_bytes,
+                Code=Code,
+                Name=Name,
+                MenuNames=MenuNames,
+                TenantUUID=PositionManager._ToBytes(TenantUUID),
+                CompanyUUID=PositionManager._ToBytes(CompanyUUID),
+            )
+        if avp.Name != Name or avp.MenuNames != MenuNames:
+            avp.Name = Name
+            avp.MenuNames = MenuNames
+            avp.save(update_fields=['Name', 'MenuNames'])
+        return avp
+
+    @staticmethod
+    def DeleteVirtualPositions(AppUUID, Codes):
+        """按应用 + 虚拟职务编码集合删除虚拟职务行，返回删除条数"""
+        app_bytes = PositionManager._ToBytes(AppUUID)
+        codes = [c for c in (Codes or []) if c]
+        if app_bytes is None or not codes:
+            return 0
+        return AppVirtualPosition.objects.filter(AppUUID=app_bytes, Code__in=codes).delete()[0]
+
+    @staticmethod
+    def RemoveVirtualBindings(VirtualPositionUUID=None, PositionUUID=None, AppUUID=None):
+        """删除应用虚拟职务绑定（可按虚拟职务/实际职务/应用过滤），返回删除条数
+
+        三个过滤条件均为空时不动作（防止误删全表）。
+        """
+        vp_bytes = PositionManager._ToBytes(VirtualPositionUUID)
+        pos_bytes = PositionManager._ToBytes(PositionUUID)
+        app_bytes = PositionManager._ToBytes(AppUUID)
+        if vp_bytes is None and pos_bytes is None and app_bytes is None:
+            return 0
+        qs = AppVirtualBinding.objects.all()
+        if vp_bytes:
+            qs = qs.filter(VirtualPositionUUID=vp_bytes)
+        if pos_bytes:
+            qs = qs.filter(PositionUUID=pos_bytes)
+        if app_bytes:
+            qs = qs.filter(AppUUID=app_bytes)
+        return qs.delete()[0]
+
+    @staticmethod
+    def GetAppBoundPositionUUIDs(AppUUID):
+        """应用已绑定的实际职务 UUID bytes 集合（AppPosition ∪ AppVirtualBinding）"""
+        app_bytes = PositionManager._ToBytes(AppUUID)
+        if app_bytes is None:
+            return set()
+        bound = set(AppPosition.objects.filter(AppUUID=app_bytes).values_list('PositionUUID', flat=True))
+        bound |= set(AppVirtualBinding.objects.filter(AppUUID=app_bytes).values_list('PositionUUID', flat=True))
+        return bound
+
+    @staticmethod
+    def GetUserPositionUUIDs(UserUUID, RoleUUID=None, CompanyUUID=None):
+        """用户当前持有的职务 UUID bytes 集合（UserRole → UserRoleDepartment → UserRoleDepartmentPosition）
+
+        传 RoleUUID 时仅统计该角色下的 UserRole（严格按当前角色显示菜单）；
+        传 CompanyUUID 时仅统计该公司的部门关联。
+        """
+        user_bytes = PositionManager._ToBytes(UserUUID)
+        if user_bytes is None:
+            return set()
+        ur_qs = UserRole.objects.filter(UserUUID=user_bytes)
+        role_bytes = PositionManager._ToBytes(RoleUUID)
+        if role_bytes:
+            ur_qs = ur_qs.filter(RoleUUID=role_bytes)
+        ur_uuids = list(ur_qs.values_list('UserRoleUUID', flat=True))
+        if not ur_uuids:
+            return set()
+        urd_qs = UserRoleDepartment.objects.filter(UserRoleUUID__in=ur_uuids)
+        company_bytes = PositionManager._ToBytes(CompanyUUID)
+        if company_bytes:
+            urd_qs = urd_qs.filter(CompanyUUID=company_bytes)
+        urd_uuids = list(urd_qs.values_list('UserRoleDepartmentUUID', flat=True))
+        if not urd_uuids:
+            return set()
+        return set(
+            UserRoleDepartmentPosition.objects.filter(UserRoleDepartmentUUID__in=urd_uuids)
+            .values_list('PositionUUID', flat=True)
+        )
 
 
 class ShopManager:
@@ -1962,6 +2356,15 @@ class TenantManager:
             return None
 
     @staticmethod
+    def ListActiveTenants():
+        """获取所有活跃租户的 UUID 列表（TenantStatus=1）
+
+        Returns:
+            list[bytes]：TenantUUID（16 字节）列表
+        """
+        return [UUIDObj(t.TenantUUID).bytes for t in Tenant.objects.filter(TenantStatus=1)]
+
+    @staticmethod
     def ApproveTenant(TenantUUID, ReviewerUUID):
         """批准租户入驻（状态 0→1，记录审核人与时间）
 
@@ -2027,6 +2430,88 @@ class CompanyManager:
         ).values_list('CompanyUUID', flat=True)
         return Company.objects.filter(CompanyUUID__in=list(company_uuids)).distinct()
 
+    @staticmethod
+    def GetCompanyByName(CompanyName):
+        """按公司名称查询（不存在返回 None）"""
+        if not CompanyName:
+            return None
+        return Company.objects.filter(CompanyName=CompanyName).first()
+
+    @staticmethod
+    def GetCompanyUUIDs(TenantUUID):
+        """获取租户下全部公司 UUID 列表
+
+        Returns:
+            list[bytes]：CompanyUUID（16 字节）列表
+        """
+        return [UUIDObj(c).bytes for c in Company.objects.filter(
+            TenantUUID=UUIDObj(TenantUUID).bytes
+        ).values_list('CompanyUUID', flat=True)]
+
+    @staticmethod
+    def ListEnabledCompanyUUIDs(TenantUUID=None):
+        """获取启用状态公司（CompanyStatus=1）的 UUID 列表
+
+        Args:
+            TenantUUID: 可选，限定租户；为 None 时返回全部启用公司（超管视角）
+
+        Returns:
+            list[bytes]：CompanyUUID（16 字节）列表；租户 UUID 非法时返回空列表
+        """
+        qs = Company.objects.filter(CompanyStatus=1)
+        if TenantUUID is not None:
+            try:
+                tenant_bytes = UUIDObj(TenantUUID).bytes
+            except Exception:
+                return []
+            qs = qs.filter(TenantUUID=tenant_bytes)
+        return [UUIDObj(c).bytes for c in qs.values_list('CompanyUUID', flat=True)]
+
+    @staticmethod
+    def GetCompanyNames(CompanyUUIDs):
+        """批量获取公司名称列表（IN 查询，SQL 侧去重）
+
+        Args:
+            CompanyUUIDs: 公司 UUID 集合（bytes/str/UUIDObj 混合均可）
+
+        Returns:
+            list[str]：公司名称列表
+        """
+        uuids = [UUIDObj(c).bytes for c in (CompanyUUIDs or []) if c]
+        if not uuids:
+            return []
+        return list(
+            Company.objects.filter(CompanyUUID__in=uuids)
+            .values_list('CompanyName', flat=True)
+        )
+
+    @staticmethod
+    def GetCompanyNameMap(CompanyUUIDs):
+        """批量获取 CompanyUUID(bytes) → CompanyName 映射
+
+        Returns:
+            dict[bytes, str]：键为 16 字节 UUID，与调用方字节键对齐
+        """
+        uuids = [UUIDObj(c).bytes for c in (CompanyUUIDs or []) if c]
+        if not uuids:
+            return {}
+        result = {}
+        for c in Company.objects.filter(CompanyUUID__in=uuids):
+            try:
+                result[c.CompanyUUID.bytes] = c.CompanyName
+            except AttributeError:
+                result[UUIDObj(c.CompanyUUID).bytes] = c.CompanyName
+        return result
+
+    @staticmethod
+    def HasCompanyInfo(TenantUUID):
+        """判断租户是否已有企业信息（CompanyInfo 同租户唯一约束的校验入口）"""
+        try:
+            tenant_bytes = UUIDObj(TenantUUID).bytes
+        except Exception:
+            return False
+        return CompanyInfo.objects.filter(TenantUUID=tenant_bytes).exists()
+
 
 class DepartmentManager:
     """部门管理器——部门查询与用户部门归属"""
@@ -2055,6 +2540,442 @@ class DepartmentManager:
             UserRoleUUID__in=list(ur_uuids),
         ).values_list('DeptUUID', flat=True)
         return Department.objects.filter(DeptUUID__in=list(dept_uuids)).distinct()
+
+    @staticmethod
+    def SetPersonInCharge(DeptUUID, UserUUID, Status=1):
+        """设置部门负责人（存在则更新状态，不存在则新建 DepartmentSMTM 行）
+
+        Args:
+            DeptUUID: 部门 UUID（bytes/str/UUIDObj 均可）
+            UserUUID: 用户 UUID（bytes/str/UUIDObj 均可）
+            Status: 负责人状态（1=负责人）
+
+        Returns:
+            DepartmentSMTM 实例
+        """
+        dept_bytes = UUIDObj(DeptUUID).bytes
+        user_bytes = UUIDObj(UserUUID).bytes
+        smtm = DepartmentSMTM.objects.filter(
+            DepartmentUUID=dept_bytes, UserUUID=user_bytes,
+        ).first()
+        if smtm is None:
+            smtm = DepartmentSMTM.objects.create(
+                SMTMUUID=uuid.uuid4().bytes,
+                DepartmentUUID=dept_bytes,
+                UserUUID=user_bytes,
+                PersonInChargeStatus=Status,
+            )
+        else:
+            smtm.PersonInChargeStatus = Status
+            smtm.save(update_fields=['PersonInChargeStatus'])
+        return smtm
+
+    @staticmethod
+    def ListCompanyCategoryUUIDs(CompanyUUID):
+        """获取公司各"部门"绑定的通用部门 UUID 集合（排除空值）
+
+        供职务搜索排序置前（PriorityCategoryUUIDs）与通用部门树使用。
+
+        Returns:
+            set[bytes]：PositionCategoryUUID 集合
+        """
+        rows = Department.objects.filter(
+            CompanyUUID=UUIDObj(CompanyUUID).bytes,
+        ).exclude(PositionCategoryUUID__isnull=True).values_list('PositionCategoryUUID', flat=True)
+        result = set()
+        for c in rows:
+            if not c:
+                continue
+            try:
+                result.add(UUIDObj(c).bytes)
+            except Exception:
+                continue
+        return result
+
+
+class AppManager:
+    """应用/功能管理器——应用注册表、安装授权与应用配置的数据访问层
+
+    仅提供数据访问：查询 / 批量映射 / 落库 / 状态位更新（映射 SAAS 主库
+    App / TenantApp / CompanyApp / UserApp / AppConfig 表）。应用可见性判定、
+    权限校验、审批流转、清单解析等业务规则由业务侧（gvsds）持有。
+    """
+
+    @staticmethod
+    def _ToBytes(value):
+        """把 bytes/str/UUIDObj 归一化为 bytes；无效返回 None"""
+        if value is None:
+            return None
+        try:
+            return UUIDObj(value).bytes
+        except Exception:
+            return None
+
+    # ==================== 应用注册表 ====================
+
+    @staticmethod
+    def ListApps():
+        """全部应用（按 AppSort, CreateTime 排序）"""
+        return App.objects.all().order_by('AppSort', 'CreateTime')
+
+    @staticmethod
+    def ListEnabledApps():
+        """全部启用中的应用（AppStatus=1，按 AppSort, CreateTime 排序）"""
+        return App.objects.filter(AppStatus=1).order_by('AppSort', 'CreateTime')
+
+    @staticmethod
+    def GetApp(AppUUID):
+        """按 UUID 查询应用（不存在返回 None）"""
+        app_bytes = AppManager._ToBytes(AppUUID)
+        if app_bytes is None:
+            return None
+        return App.objects.filter(AppUUID=app_bytes).first()
+
+    @staticmethod
+    def GetAppByCode(AppCode):
+        """按应用编码查询应用（禁用也返回；不存在返回 None）"""
+        if not AppCode:
+            return None
+        return App.objects.filter(AppCode=AppCode).first()
+
+    @staticmethod
+    def SaveAppByCode(AppCode, Values):
+        """按 AppCode upsert 应用记录（不存在则补主键新建），返回 App 实例
+
+        Args:
+            AppCode: 应用编码（定位键，忽略 Values 中的 AppCode）
+            Values: dict，需写入的字段
+        """
+        app = App.objects.filter(AppCode=AppCode).first()
+        if app is None:
+            app = App(AppUUID=uuid.uuid4().bytes, AppCode=AppCode)
+        for key, value in (Values or {}).items():
+            if key == 'AppCode':
+                continue
+            setattr(app, key, value)
+        app.save()
+        return app
+
+    @staticmethod
+    def SetStrictPositionVisible(AppUUID, Value):
+        """设置应用严格职务可见开关（0/1），返回是否命中记录"""
+        app = AppManager.GetApp(AppUUID)
+        if app is None:
+            return False
+        app.StrictPositionVisible = 1 if Value else 0
+        app.save(update_fields=['StrictPositionVisible'])
+        return True
+
+    @staticmethod
+    def SetServiceOnline(ServiceName, Online):
+        """按提供方服务名切换远端应用在线状态，返回受影响行数
+
+        Online=True → 仅把离线(0)的记录置为 1；Online=False → 仅把在线(1)的置为 0。
+        """
+        if not ServiceName:
+            return 0
+        return App.objects.filter(
+            Source='msync', ServiceName=ServiceName,
+            ServiceOnline=0 if Online else 1,
+        ).update(ServiceOnline=1 if Online else 0)
+
+    # ==================== 企业安装（租户维度） ====================
+
+    @staticmethod
+    def ListTenantApps(TenantUUID, InstallStatus=None):
+        """租户安装记录列表（可按 InstallStatus 过滤）"""
+        tenant_bytes = AppManager._ToBytes(TenantUUID)
+        if tenant_bytes is None:
+            return []
+        qs = TenantApp.objects.filter(TenantUUID=tenant_bytes)
+        if InstallStatus is not None:
+            qs = qs.filter(InstallStatus=InstallStatus)
+        return list(qs)
+
+    @staticmethod
+    def GetTenantApp(TenantUUID, AppUUID):
+        """查询租户安装记录（不存在返回 None）"""
+        tenant_bytes = AppManager._ToBytes(TenantUUID)
+        app_bytes = AppManager._ToBytes(AppUUID)
+        if tenant_bytes is None or app_bytes is None:
+            return None
+        return TenantApp.objects.filter(TenantUUID=tenant_bytes, AppUUID=app_bytes).first()
+
+    @staticmethod
+    def InstallTenantApp(TenantUUID, AppUUID, AuthRequired=0):
+        """租户安装/启用企业功能（无记录则补主键新建，已有则置启用）
+
+        Returns:
+            (TenantApp, created)
+        """
+        tenant_bytes = AppManager._ToBytes(TenantUUID)
+        app_bytes = AppManager._ToBytes(AppUUID)
+        ta, created = TenantApp.objects.get_or_create(
+            TenantUUID=tenant_bytes,
+            AppUUID=app_bytes,
+            defaults={
+                'TenantAppUUID': uuid.uuid4().bytes,
+                'InstallStatus': 1,
+                'AuthStatus': 1 if AuthRequired == 1 else 0,
+                'InstallTime': datetime.datetime.utcnow(),
+            },
+        )
+        if not created:
+            ta.InstallStatus = 1
+            if AuthRequired == 1 and ta.AuthStatus != 1:
+                ta.AuthStatus = 1
+            ta.save(update_fields=['InstallStatus', 'AuthStatus'])
+        return ta, created
+
+    @staticmethod
+    def UninstallTenantApp(TenantUUID, AppUUID):
+        """租户停用企业功能（置 InstallStatus=0），返回是否命中记录"""
+        ta = AppManager.GetTenantApp(TenantUUID, AppUUID)
+        if ta is None:
+            return False
+        ta.InstallStatus = 0
+        ta.save(update_fields=['InstallStatus'])
+        return True
+
+    # ==================== 企业安装（公司维度） ====================
+
+    @staticmethod
+    def ListCompanyApps(CompanyUUID, InstallStatus=None):
+        """公司安装记录列表（可按 InstallStatus 过滤）"""
+        company_bytes = AppManager._ToBytes(CompanyUUID)
+        if company_bytes is None:
+            return []
+        qs = CompanyApp.objects.filter(CompanyUUID=company_bytes)
+        if InstallStatus is not None:
+            qs = qs.filter(InstallStatus=InstallStatus)
+        return list(qs)
+
+    @staticmethod
+    def GetCompanyApp(CompanyUUID, AppUUID):
+        """查询公司安装记录（不存在返回 None）"""
+        company_bytes = AppManager._ToBytes(CompanyUUID)
+        app_bytes = AppManager._ToBytes(AppUUID)
+        if company_bytes is None or app_bytes is None:
+            return None
+        return CompanyApp.objects.filter(CompanyUUID=company_bytes, AppUUID=app_bytes).first()
+
+    @staticmethod
+    def InstallCompanyApp(CompanyUUID, AppUUID, InstallBy=None):
+        """为公司安装/启用企业功能（无记录则补主键新建，已有则置启用）
+
+        Returns:
+            (CompanyApp, created)
+        """
+        company_bytes = AppManager._ToBytes(CompanyUUID)
+        app_bytes = AppManager._ToBytes(AppUUID)
+        install_by = AppManager._ToBytes(InstallBy)
+        ca, created = CompanyApp.objects.get_or_create(
+            CompanyUUID=company_bytes,
+            AppUUID=app_bytes,
+            defaults={
+                'CompanyAppUUID': uuid.uuid4().bytes,
+                'InstallStatus': 1,
+                'InstallTime': datetime.datetime.utcnow(),
+                'InstallBy': install_by,
+            },
+        )
+        if not created:
+            ca.InstallStatus = 1
+            if install_by:
+                ca.InstallBy = install_by
+            ca.save(update_fields=['InstallStatus', 'InstallBy'])
+        return ca, created
+
+    @staticmethod
+    def UninstallCompanyApp(CompanyUUID, AppUUID):
+        """停用公司安装（置 InstallStatus=0），返回是否命中记录"""
+        ca = AppManager.GetCompanyApp(CompanyUUID, AppUUID)
+        if ca is None:
+            return False
+        ca.InstallStatus = 0
+        ca.save(update_fields=['InstallStatus'])
+        return True
+
+    @staticmethod
+    def ListCompanyAppInstalls(AppUUIDs, CompanyUUIDs, InstallStatus=None):
+        """批量查询指定应用在若干公司下的安装记录
+
+        Args:
+            AppUUIDs / CompanyUUIDs: UUID 列表（bytes/str/UUIDObj 均可）
+        """
+        app_list = [a for a in (AppManager._ToBytes(x) for x in (AppUUIDs or [])) if a]
+        company_list = [c for c in (AppManager._ToBytes(x) for x in (CompanyUUIDs or [])) if c]
+        if not app_list or not company_list:
+            return []
+        qs = CompanyApp.objects.filter(AppUUID__in=app_list, CompanyUUID__in=company_list)
+        if InstallStatus is not None:
+            qs = qs.filter(InstallStatus=InstallStatus)
+        return list(qs)
+
+    @staticmethod
+    def HasEnabledInstall(AppUUID, TenantUUID=None, CompanyUUID=None):
+        """应用是否仍存在任意启用中的安装/启用记录
+
+        传 TenantUUID/CompanyUUID 时对应维度限定范围；均未传则全局判定。
+        """
+        app_bytes = AppManager._ToBytes(AppUUID)
+        if app_bytes is None:
+            return False
+        tenant_bytes = AppManager._ToBytes(TenantUUID)
+        company_bytes = AppManager._ToBytes(CompanyUUID)
+        ta_qs = TenantApp.objects.filter(AppUUID=app_bytes, InstallStatus=1)
+        if tenant_bytes:
+            ta_qs = ta_qs.filter(TenantUUID=tenant_bytes)
+        if ta_qs.exists():
+            return True
+        ca_qs = CompanyApp.objects.filter(AppUUID=app_bytes, InstallStatus=1)
+        if company_bytes:
+            ca_qs = ca_qs.filter(CompanyUUID=company_bytes)
+        if ca_qs.exists():
+            return True
+        if UserApp.objects.filter(AppUUID=app_bytes, UseStatus=1).exists():
+            return True
+        return False
+
+    # ==================== 个人应用（启用/申请/审批） ====================
+
+    @staticmethod
+    def ListUserApps(UserUUID, UseStatus=None, ApplyStatus=None):
+        """个人应用记录列表（可按启用/申请状态过滤）"""
+        user_bytes = AppManager._ToBytes(UserUUID)
+        if user_bytes is None:
+            return []
+        qs = UserApp.objects.filter(UserUUID=user_bytes)
+        if UseStatus is not None:
+            qs = qs.filter(UseStatus=UseStatus)
+        if ApplyStatus is not None:
+            qs = qs.filter(ApplyStatus=ApplyStatus)
+        return list(qs)
+
+    @staticmethod
+    def GetUserApp(UserUUID, AppUUID):
+        """查询个人应用记录（不存在返回 None）"""
+        user_bytes = AppManager._ToBytes(UserUUID)
+        app_bytes = AppManager._ToBytes(AppUUID)
+        if user_bytes is None or app_bytes is None:
+            return None
+        return UserApp.objects.filter(UserUUID=user_bytes, AppUUID=app_bytes).first()
+
+    @staticmethod
+    def GetUserAppByUUID(UserAppUUID):
+        """按记录 UUID 查询个人应用（不存在返回 None）"""
+        ua_bytes = AppManager._ToBytes(UserAppUUID)
+        if ua_bytes is None:
+            return None
+        return UserApp.objects.filter(UserAppUUID=ua_bytes).first()
+
+    @staticmethod
+    def GetOrCreateUserApp(UserUUID, AppUUID):
+        """取得（或补主键新建）个人应用记录
+
+        Returns:
+            (UserApp, created)
+        """
+        user_bytes = AppManager._ToBytes(UserUUID)
+        app_bytes = AppManager._ToBytes(AppUUID)
+        return UserApp.objects.get_or_create(
+            UserUUID=user_bytes,
+            AppUUID=app_bytes,
+            defaults={'UserAppUUID': uuid.uuid4().bytes},
+        )
+
+    @staticmethod
+    def SetUserAppUseStatus(UserUUID, AppUUID, UseStatus):
+        """设置个人应用启用状态（1/0），返回是否命中记录"""
+        ua = AppManager.GetUserApp(UserUUID, AppUUID)
+        if ua is None:
+            return False
+        ua.UseStatus = 1 if UseStatus else 0
+        ua.save(update_fields=['UseStatus'])
+        return True
+
+    @staticmethod
+    def SetUserAppApplyStatus(UserAppUUID, ApplyStatus, ApplyTime=None):
+        """设置个人授权申请状态（可同时写申请时间），返回是否命中记录"""
+        ua = AppManager.GetUserAppByUUID(UserAppUUID)
+        if ua is None:
+            return False
+        ua.ApplyStatus = ApplyStatus
+        fields = ['ApplyStatus']
+        if ApplyTime is not None:
+            ua.ApplyTime = ApplyTime
+            fields.append('ApplyTime')
+        ua.save(update_fields=fields)
+        return True
+
+    @staticmethod
+    def SetUserAppApprove(UserAppUUID, ApplyStatus, UseStatus, ApproveBy=None, ApproveTime=None):
+        """写入个人授权审批结果（申请状态/启用状态/审批人/审批时间），返回是否命中记录"""
+        ua = AppManager.GetUserAppByUUID(UserAppUUID)
+        if ua is None:
+            return False
+        ua.ApplyStatus = ApplyStatus
+        ua.UseStatus = UseStatus
+        ua.ApproveBy = AppManager._ToBytes(ApproveBy)
+        ua.ApproveTime = ApproveTime
+        ua.save(update_fields=['ApplyStatus', 'UseStatus', 'ApproveBy', 'ApproveTime'])
+        return True
+
+    @staticmethod
+    def ListPendingApplications(TenantUUID):
+        """待审批的个人授权申请（ApplyStatus=1，按申请时间倒序）
+
+        说明：UserApp 表无租户列，租户隔离由上层承担（保持既有行为）。
+        """
+        return list(UserApp.objects.filter(ApplyStatus=1).order_by('-ApplyTime'))
+
+    # ==================== 应用配置（AppConfig 键值表） ====================
+
+    @staticmethod
+    def ListAppConfigs(TenantUUID, AppUUID, CompanyUUID=None):
+        """查询应用配置行
+
+        CompanyUUID 传值时取公司级配置；传 None 取租户级默认（CompanyUUID 为空）。
+        """
+        tenant_bytes = AppManager._ToBytes(TenantUUID)
+        app_bytes = AppManager._ToBytes(AppUUID)
+        if tenant_bytes is None or app_bytes is None:
+            return []
+        qs = AppConfig.objects.filter(TenantUUID=tenant_bytes, AppUUID=app_bytes)
+        company_bytes = AppManager._ToBytes(CompanyUUID)
+        if company_bytes:
+            qs = qs.filter(CompanyUUID=company_bytes)
+        else:
+            qs = qs.filter(CompanyUUID__isnull=True)
+        return list(qs)
+
+    @staticmethod
+    def UpsertAppConfig(TenantUUID, AppUUID, ConfigKey, ConfigValue,
+                        CompanyUUID=None, UpdateBy=None, UpdateTime=None):
+        """按 (租户, 公司, 应用, 键) upsert 配置值（新建补主键），返回 AppConfig 实例"""
+        tenant_bytes = AppManager._ToBytes(TenantUUID)
+        app_bytes = AppManager._ToBytes(AppUUID)
+        company_bytes = AppManager._ToBytes(CompanyUUID)
+        update_by = AppManager._ToBytes(UpdateBy)
+        now = UpdateTime if UpdateTime is not None else datetime.datetime.utcnow()
+        cfg, created = AppConfig.objects.get_or_create(
+            TenantUUID=tenant_bytes,
+            CompanyUUID=company_bytes,
+            AppUUID=app_bytes,
+            ConfigKey=ConfigKey,
+            defaults={
+                'AppConfigUUID': uuid.uuid4().bytes,
+                'ConfigValue': ConfigValue,
+                'UpdateBy': update_by,
+                'UpdateTime': now,
+            },
+        )
+        if not created:
+            cfg.ConfigValue = ConfigValue
+            cfg.UpdateBy = update_by
+            cfg.UpdateTime = now
+            cfg.save(update_fields=['ConfigValue', 'UpdateBy', 'UpdateTime'])
+        return cfg
 
 
 class MessageManager:
@@ -2246,6 +3167,31 @@ class MenuManager:
             'PermLevel': menu.PermissionLevel or 0,
             'PermAttr': menu.PermissionAttr or '',
         }
+
+    @staticmethod
+    def GetByLink(MenuLink):
+        """按菜单链接（页面路径）查询菜单（不存在返回 None）
+
+        供"按菜单私有性拦截"等场景反查菜单（Menu.MenuLink 为页面路径）。
+        """
+        if not MenuLink:
+            return None
+        return Menu.objects.filter(MenuLink=MenuLink).first()
+
+    @staticmethod
+    def GetByMenuName(MenuName):
+        """按菜单名（全局唯一标识）查询菜单（不存在返回 None）"""
+        if not MenuName:
+            return None
+        return Menu.objects.filter(MenuName=MenuName).first()
+
+    @staticmethod
+    def DeleteByNames(MenuNames):
+        """按菜单名集合批量删除菜单，返回删除条数"""
+        names = [n for n in (MenuNames or []) if n]
+        if not names:
+            return 0
+        return Menu.objects.filter(MenuName__in=names).delete()[0]
 
     @staticmethod
     def ListVisible(CompanyUUID=None):
