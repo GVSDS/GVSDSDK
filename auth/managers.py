@@ -3,7 +3,7 @@ import uuid
 from django.db.models import Q
 from django.utils import timezone as _timezone
 
-from gvsdsdk.models import Role, UserRole, UserRoleDepartment, UserRoleDepartmentPosition, UserRoleWorkgroup, RolePermission, Permission, Position, PositionCategory, PositionTemplate, PositionTemplatePermission, AppPosition, AppVirtualPosition, AppVirtualBinding, App, TenantApp, CompanyApp, UserApp, AppConfig, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, DepartmentSMTM, Message, Menu, WorkOrder, AuditLog, ItemReference, Backpack, FileAsset, CompanyInfo
+from gvsdsdk.models import Role, UserRole, UserRoleDepartment, UserRoleDepartmentPosition, UserRoleWorkgroup, RolePermission, Permission, Position, PositionCategory, PositionTemplate, PositionTemplatePermission, AppPosition, AppVirtualPosition, AppVirtualBinding, App, TenantApp, CompanyApp, UserApp, AppConfig, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, DepartmentSMTM, Workgroup, Message, Menu, WorkOrder, AuditLog, ItemReference, Backpack, FileAsset, CompanyInfo
 from gvsdsdk.auth.crypto import HashPassword, VerifyPassword
 from gvsdsdk.model_utils import _GetUserModel, UUIDObj
 
@@ -132,6 +132,20 @@ class RoleManager:
             UserRole.objects.filter(CompanyUUID=UUIDObj(CompanyUUID).bytes)
             .values_list('UserUUID', flat=True)
         )
+
+    @staticmethod
+    def QueryUserRolesByCompany(CompanyUUID):
+        """按公司查询用户-角色关联（CompanyUUID 缺失或非法返回空集）
+
+        供视图层在「显式指定公司」时强制收窄数据范围（超管也不豁免）。
+        """
+        if not CompanyUUID:
+            return UserRole.objects.none()
+        try:
+            comp_bytes = UUIDObj(CompanyUUID).bytes
+        except Exception:
+            return UserRole.objects.none()
+        return UserRole.objects.filter(CompanyUUID=comp_bytes)
 
     @staticmethod
     def AssignPermission(RoleUUID, PermUUID, CompanyUUID):
@@ -2577,6 +2591,22 @@ class DepartmentManager:
             return None
 
     @staticmethod
+    def QueryAll():
+        """全部部门（供部门树全量拉取；公司隔离由调用方按需叠加）"""
+        return Department.objects.all()
+
+    @staticmethod
+    def QueryByCompany(CompanyUUID):
+        """按公司查询部门（CompanyUUID 缺失或非法返回空集，避免退化成全表查询）"""
+        if not CompanyUUID:
+            return Department.objects.none()
+        try:
+            comp_bytes = UUIDObj(CompanyUUID).bytes
+        except Exception:
+            return Department.objects.none()
+        return Department.objects.filter(CompanyUUID=comp_bytes)
+
+    @staticmethod
     def GetDepartmentsForUser(UserUUID):
         """获取用户部门列表（UserRole → UserRoleDepartment → Department，去重）"""
         if not UserUUID:
@@ -3028,6 +3058,24 @@ class AppManager:
             cfg.UpdateTime = now
             cfg.save(update_fields=['ConfigValue', 'UpdateBy', 'UpdateTime'])
         return cfg
+
+
+class WorkgroupManager:
+    """工作组管理器——工作组查询（组织维度的成员集合）"""
+
+    @staticmethod
+    def QueryByCompany(CompanyUUID):
+        """按公司查询工作组（CompanyUUID 缺失或非法返回空集）
+
+        供视图层在「显式指定公司」时强制收窄数据范围（超管也不豁免）。
+        """
+        if not CompanyUUID:
+            return Workgroup.objects.none()
+        try:
+            comp_bytes = UUIDObj(CompanyUUID).bytes
+        except Exception:
+            return Workgroup.objects.none()
+        return Workgroup.objects.filter(CompanyUUID=comp_bytes)
 
 
 class MessageManager:
@@ -3769,6 +3817,11 @@ class InventoryManager:
 
 class AssetManager:
     """文件资产管理器——SHA1 去重存储与引用计数"""
+
+    @staticmethod
+    def QueryAll():
+        """全部文件资产（供视图层按权限叠加公司过滤；数据范围由调用方决定）"""
+        return FileAsset.objects.all()
 
     @staticmethod
     def EnsureAsset(FileSHA1, FileName, FileSize, MimeType, StoragePath,
