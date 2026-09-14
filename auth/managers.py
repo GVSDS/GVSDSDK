@@ -2365,6 +2365,15 @@ class TenantManager:
         return [UUIDObj(t.TenantUUID).bytes for t in Tenant.objects.filter(TenantStatus=1)]
 
     @staticmethod
+    def ListAllTenants():
+        """获取全部租户（不分状态，供种子/运维命令遍历使用）
+
+        Returns:
+            QuerySet[Tenant]
+        """
+        return Tenant.objects.all()
+
+    @staticmethod
     def ApproveTenant(TenantUUID, ReviewerUUID):
         """批准租户入驻（状态 0→1，记录审核人与时间）
 
@@ -3537,6 +3546,28 @@ class AuditManager:
         except Exception:
             pass
         return True
+
+    @staticmethod
+    def QueryBefore(Threshold):
+        """查询早于指定时间的审计日志（供清理任务统计与删除）
+
+        Args:
+            Threshold: 时间阈值（datetime），CreateTime 早于该值即命中
+
+        Returns:
+            QuerySet[AuditLog]
+        """
+        return AuditLog.objects.filter(CreateTime__lt=Threshold)
+
+    @staticmethod
+    def PurgeBefore(Threshold):
+        """删除早于指定时间的审计日志
+
+        Returns:
+            实际删除条数
+        """
+        deleted, _ = AuditManager.QueryBefore(Threshold).delete()
+        return deleted
 
 
 class InventoryManager:
