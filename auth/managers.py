@@ -1823,6 +1823,35 @@ class AuthManager:
         return User.objects.filter(UserUUID=UUIDObj(UserUUID).bytes).first()
 
     @staticmethod
+    def GetUserNames(UserUUIDs):
+        """批量取用户名：{UserUUID 字节: UserName}
+
+        单次 __in 查询，供列表页一次性回填用户名，避免逐个查库产生 N+1。
+
+        Args:
+            UserUUIDs: UUID 可迭代对象（bytes/str/UUIDObj 均可，无效项自动跳过）
+
+        Returns:
+            dict[bytes, str]：仅含查到的用户；用户名为空时该键值为空串
+        """
+        names = {}
+        uuids = []
+        for value in UserUUIDs or []:
+            if not value:
+                continue
+            try:
+                uuids.append(UUIDObj(value).bytes)
+            except Exception:
+                continue
+        if not uuids:
+            return names
+        User = _GetUserModel()
+        for u in User.objects.filter(UserUUID__in=uuids):
+            if u.UserUUID:
+                names[UUIDObj(u.UserUUID).bytes] = u.UserName or ''
+        return names
+
+    @staticmethod
     def CountUsers(UserUUIDs=None):
         """统计用户数量（可按 UUID 集合过滤；空集合返回 0）"""
         User = _GetUserModel()
@@ -2445,6 +2474,20 @@ class CompanyManager:
         if not CompanyName:
             return None
         return Company.objects.filter(CompanyName=CompanyName).first()
+
+    @staticmethod
+    def BelongsToTenant(CompanyUUID, TenantUUID):
+        """判断公司是否归属指定租户（任一参数缺失或非法返回 False）"""
+        if not CompanyUUID or not TenantUUID:
+            return False
+        try:
+            comp_bytes = UUIDObj(CompanyUUID).bytes
+            tenant_bytes = UUIDObj(TenantUUID).bytes
+        except Exception:
+            return False
+        return Company.objects.filter(
+            CompanyUUID=comp_bytes, TenantUUID=tenant_bytes,
+        ).exists()
 
     @staticmethod
     def GetCompanyUUIDs(TenantUUID):
