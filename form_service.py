@@ -268,30 +268,124 @@ class FormServiceBase:
         except Exception:
             return []
 
+    # ── 查询链公共辅助（本类 GetTable 与子类自定义列表查询复用，避免重复实现） ──
+
+    @staticmethod
+    def ParsePagination(params, DefaultPageSize=20, MaxPageSize=None):
+        """解析分页参数，兼容 PageIndex/PageSize 与前端常用的 page/pageSize 两套命名
+
+        Args:
+            params: 请求参数字典
+            DefaultPageSize: 未传或非法时的页大小
+            MaxPageSize: 页大小上限，None 表示不限制
+
+        Returns:
+            (page, page_size)：page 从 1 起（非法值回落 1，避免负切片）
+        """
+        try:
+            page = int(params.get('PageIndex') or params.get('page') or 1)
+        except (ValueError, TypeError):
+            page = 1
+        if page < 1:
+            page = 1
+        try:
+            page_size = int(params.get('PageSize') or params.get('pageSize') or DefaultPageSize)
+        except (ValueError, TypeError):
+            page_size = DefaultPageSize
+        if page_size < 1:
+            page_size = DefaultPageSize
+        if MaxPageSize:
+            page_size = min(page_size, MaxPageSize)
+        return page, page_size
+
+    @staticmethod
+    def ApplyKeyword(qs, model, keyword):
+        """关键字模糊过滤：对模型所有 CharField/TextField 做 OR icontains"""
+        if not keyword:
+            return qs
+        or_conditions = {}
+        for f in model._meta.get_fields():
+            if hasattr(f, 'name') and f.__class__.__name__ in ('CharField', 'TextField'):
+                or_conditions[f'{f.name}__icontains'] = keyword
+        if not or_conditions:
+            return qs
+        q = Q()
+        for k, v in or_conditions.items():
+            q |= Q(**{k: v})
+        return qs.filter(q)
+
+    def ApplyExactFilters(self, qs, model, params, SkipKeys=None):
+        """把与模型字段同名的请求参数用作精确过滤
+
+        UUIDField/ForeignKey 自动转 BINARY(16)（ForeignKey 用 attname `xxx_id` 传原始 PK）。
+
+        Args:
+            qs: 待过滤 QuerySet
+            model: 目标模型
+            params: 请求参数字典
+            SkipKeys: 不参与过滤的键（分页/搜索等控制参数）
+        """
+        skip = set(SkipKeys or ())
+        field_map = self._BuildFieldMap(model)
+        for key, value in params.items():
+            if key in skip or not value:
+                continue
+            field = field_map.get(key)
+            if field is None:
+                continue
+            field_type = field.__class__.__name__
+            if field_type == 'ForeignKey':
+                try:
+                    uuid_bytes = uuid.UUID(str(value)).bytes
+                except (ValueError, AttributeError):
+                    uuid_bytes = value
+                qs = qs.filter(**{key + '_id': uuid_bytes})
+            elif field_type in ('UUIDField', 'BinaryField', 'FixedBinaryField'):
+                try:
+                    qs = qs.filter(**{key: uuid.UUID(str(value)).bytes})
+                except (ValueError, AttributeError):
+                    qs = qs.filter(**{key: value})
+            else:
+                qs = qs.filter(**{key: value})
+        return qs
+
+    def ApplySelectRelated(self, qs, model, FieldNames):
+        """对指定字段中属于 ForeignKey 的做 select_related 预加载
+
+        UUIDField 类型字段（非 FK）会被跳过，避免 select_related 触发 FieldError。
+        """
+        field_map = self._BuildFieldMap(model)
+        fk_names = []
+        for name in FieldNames or ():
+            field = field_map.get(name)
+            if field is not None and field.__class__.__name__ == 'ForeignKey':
+                fk_names.append(name)
+        if fk_names:
+            qs = qs.select_related(*fk_names)
+        return qs
+
+    @staticmethod
+    def BuildRecords(model, ObjList):
+        """模型实例列表 → PascalCase 字典列表
+
+        ForeignKey 取 attname（`xxx_id`）拿原始 PK 值，与前端契约（UUID 字符串）一致。
+        """
+        records = []
+        for obj in ObjList:
+            row = {}
+            for f in model._meta.concrete_fields:
+                f_name = f.attname if f.__class__.__name__ == 'ForeignKey' else f.name
+                row[f.name] = getattr(obj, f_name, None)
+            records.append(_PascalizeRecord(row, model))
+        return records
+
     def GetTable(self, table_name, params):
         model = self.TABLE_MAP.get(table_name)
         if not model:
             return {'records': [], 'total': 0}
         qs = model.objects.all()
-        keyword = params.get('keyword', '')
-        if keyword:
-            or_conditions = {}
-            for f in model._meta.get_fields():
-                if hasattr(f, 'name') and f.__class__.__name__ in ('CharField', 'TextField'):
-                    or_conditions[f'{f.name}__icontains'] = keyword
-            if or_conditions:
-                q = Q()
-                for k, v in or_conditions.items():
-                    q |= Q(**{k: v})
-                qs = qs.filter(q)
-        try:
-            page = int(params.get('PageIndex', 1))
-        except (ValueError, TypeError):
-            page = 1
-        try:
-            page_size = min(max(int(params.get('PageSize', 20)), 1), 200)
-        except (ValueError, TypeError):
-            page_size = 20
+        qs = self.ApplyKeyword(qs, model, params.get('keyword', ''))
+        page, page_size = self.ParsePagination(params, MaxPageSize=200)
         total = qs.count()
         start = (page - 1) * page_size
         records = [_PascalizeRecord(r, model) for r in qs[start:start + page_size].values()]
