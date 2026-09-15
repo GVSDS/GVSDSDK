@@ -68,6 +68,7 @@ class FormServiceBase:
 
     TABLE_MAP = {}
     ENTITY_PICKER_MAP = {}
+    UUID_FIELD_ENTITY_MAP = {}
     READONLY_TABLES_FOR_NORMAL = set()
     ADMIN_ONLY_TABLES = set()
 
@@ -267,6 +268,191 @@ class FormServiceBase:
             return columns
         except Exception:
             return []
+
+    # ── entityPicker 实体标签解析（由 ENTITY_PICKER_MAP / UUID_FIELD_ENTITY_MAP 驱动） ──
+
+    def _GetEntityPickerFields(self, model):
+        """获取模型中所有 entityPicker 类型的字段信息
+
+        两类字段都会识别：
+        - ForeignKey：按关联模型名查 ENTITY_PICKER_MAP
+        - UUIDField（非主键）：按字段名查 UUID_FIELD_ENTITY_MAP，再取 ENTITY_PICKER_MAP 配置
+
+        Returns:
+            list[dict]：{'field_name','label_field','value_field','entity_name','extra_fields'}
+        """
+        result = []
+        for f in model._meta.get_fields():
+            if not hasattr(f, 'name'):
+                continue
+            # ForeignKey 字段
+            if f.__class__.__name__ == 'ForeignKey':
+                try:
+                    related_model = getattr(f, 'related_model', None)
+                    if related_model:
+                        related_name = related_model.__name__
+                        ep_config = self.ENTITY_PICKER_MAP.get(related_name)
+                        if ep_config:
+                            result.append({
+                                'field_name': f.name,
+                                'label_field': ep_config['labelField'],
+                                'value_field': ep_config['valueField'],
+                                'entity_name': related_name,
+                                'extra_fields': ep_config.get('extraFields', []),
+                            })
+                except Exception:
+                    pass
+            # UUIDField 字段（非 ForeignKey）
+            elif f.__class__.__name__ == 'UUIDField' and not getattr(f, 'primary_key', False):
+                entity_name = self.UUID_FIELD_ENTITY_MAP.get(f.name)
+                if entity_name:
+                    ep_config = self.ENTITY_PICKER_MAP.get(entity_name)
+                    if ep_config:
+                        result.append({
+                            'field_name': f.name,
+                            'label_field': ep_config['labelField'],
+                            'value_field': ep_config['valueField'],
+                            'entity_name': entity_name,
+                            'extra_fields': ep_config.get('extraFields', []),
+                        })
+        return result
+
+    def _EnrichEntityLabels(self, ObjList, EpFields, Records):
+        """为 Records 中的 entityPicker 字段补充 `_label` 后缀字段，以及 extraFields
+
+        支持两种字段类型：
+        - ForeignKey：getattr(obj, field_name) 返回关联模型实例，直接取 label_field
+        - UUIDField：getattr(obj, field_name) 返回 UUIDObj，需批量查询关联表获取名称
+
+        Args:
+            ObjList: 已取出的模型实例列表（调用方通常已 list()，避免重复查库）
+            EpFields: _GetEntityPickerFields 的返回值
+            Records: 与 ObjList 等长的字典列表，原地补充标签字段
+        """
+        obj_list = list(ObjList)
+        if not obj_list:
+            return Records
+
+        # 预构建 UUIDField 类型的 UUID → label 映射（批量查询优化性能）
+        # key: (entity_name, label_field), value: {uuid_bytes: label}
+        uuid_label_cache = {}
+        uuid_extra_cache = {}  # key: (entity_name, extra_field), value: {uuid_bytes: value}
+
+        for ep_info in EpFields:
+            field_name = ep_info['field_name']
+            entity_name = ep_info['entity_name']
+            label_field = ep_info['label_field']
+            extra_fields = ep_info.get('extra_fields', [])
+            value_field = ep_info['value_field']
+
+            # 判断字段类型
+            field_obj = None
+            for f in obj_list[0]._meta.get_fields():
+                if hasattr(f, 'name') and f.name == field_name:
+                    field_obj = f
+                    break
+
+            # 仅对 UUIDField（非主键）类型批量查询；ForeignKey 通过 getattr 直接获取
+            if not (field_obj and field_obj.__class__.__name__ == 'UUIDField'
+                    and not getattr(field_obj, 'primary_key', False)):
+                continue
+
+            # 收集所有 UUID 值（转为 bytes）
+            uuid_values = set()
+            for obj in obj_list:
+                val = getattr(obj, field_name, None)
+                if val is not None:
+                    if hasattr(val, 'bytes'):
+                        uuid_values.add(val.bytes)
+                    elif isinstance(val, str):
+                        try:
+                            uuid_values.add(uuid.UUID(val).bytes)
+                        except ValueError:
+                            pass
+
+            if not uuid_values:
+                continue
+
+            related_model = self.TABLE_MAP.get(entity_name)
+            if not related_model:
+                continue
+
+            # 批量查询关联表
+            try:
+                related_qs = related_model.objects.filter(**{f'{value_field}__in': uuid_values})
+                for r in related_qs:
+                    pk_val = getattr(r, value_field, None)
+                    pk_bytes = pk_val.bytes if hasattr(pk_val, 'bytes') else pk_val
+                    if pk_bytes is None:
+                        continue
+                    label = getattr(r, label_field, None)
+                    if label is not None:
+                        uuid_label_cache.setdefault((entity_name, label_field), {})[pk_bytes] = label
+                    for ef in extra_fields:
+                        ef_val = getattr(r, ef, None)
+                        if ef_val is not None:
+                            uuid_extra_cache.setdefault((entity_name, ef), {})[pk_bytes] = ef_val
+            except Exception:
+                pass
+
+        for i, obj in enumerate(obj_list):
+            if i >= len(Records):
+                break
+            for ep_info in EpFields:
+                field_name = ep_info['field_name']
+                label_field = ep_info['label_field']
+                extra_fields = ep_info.get('extra_fields', [])
+                entity_name = ep_info['entity_name']
+
+                # 判断字段类型
+                field_obj = None
+                for f in obj._meta.get_fields():
+                    if hasattr(f, 'name') and f.name == field_name:
+                        field_obj = f
+                        break
+
+                try:
+                    # 获取 db_column 作为 key 前缀
+                    db_col = None
+                    for f in obj._meta.get_fields():
+                        if hasattr(f, 'name') and f.name == field_name and hasattr(f, 'db_column'):
+                            db_col = f.db_column or f.name
+                            break
+                    key_prefix = db_col or field_name
+
+                    is_uuid_field = (field_obj
+                                     and field_obj.__class__.__name__ == 'UUIDField'
+                                     and not getattr(field_obj, 'primary_key', False))
+
+                    if is_uuid_field:
+                        # UUIDField 类型：从缓存查找
+                        val = getattr(obj, field_name, None)
+                        if val is None:
+                            continue
+                        val_bytes = val.bytes if hasattr(val, 'bytes') else val
+                        if val_bytes is None:
+                            continue
+                        label = uuid_label_cache.get((entity_name, label_field), {}).get(val_bytes)
+                        if label is not None:
+                            Records[i][key_prefix + '_label'] = str(label)
+                        for ef in extra_fields:
+                            ef_val = uuid_extra_cache.get((entity_name, ef), {}).get(val_bytes)
+                            if ef_val is not None:
+                                Records[i][key_prefix + '_' + ef] = ef_val
+                    else:
+                        # ForeignKey 类型：直接获取关联实例
+                        related_obj = getattr(obj, field_name, None)
+                        if related_obj is not None:
+                            label = getattr(related_obj, label_field, None)
+                            if label is not None:
+                                Records[i][key_prefix + '_label'] = str(label)
+                            for ef in extra_fields:
+                                ef_val = getattr(related_obj, ef, None)
+                                if ef_val is not None:
+                                    Records[i][key_prefix + '_' + ef] = ef_val
+                except Exception:
+                    pass
+        return Records
 
     # ── 查询链公共辅助（本类 GetTable 与子类自定义列表查询复用，避免重复实现） ──
 
