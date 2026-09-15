@@ -148,6 +148,28 @@ class RoleManager:
         return UserRole.objects.filter(CompanyUUID=comp_bytes)
 
     @staticmethod
+    def GetUserRolesByUUIDs(UserRoleUUIDs):
+        """批量按 UUID 取「用户-角色」关联行（无效项自动跳过）
+
+        Args:
+            UserRoleUUIDs: UserRoleUUID 集合（bytes/str/UUIDObj 均可）
+
+        Returns:
+            list[UserRole]
+        """
+        uuids = []
+        for u in (UserRoleUUIDs or []):
+            if not u:
+                continue
+            try:
+                uuids.append(UUIDObj(u).bytes)
+            except Exception:
+                continue
+        if not uuids:
+            return []
+        return list(UserRole.objects.filter(UserRoleUUID__in=uuids))
+
+    @staticmethod
     def AssignPermission(RoleUUID, PermUUID, CompanyUUID):
         """为角色分配权限（指定公司）"""
         rp = RolePermission(
@@ -1218,6 +1240,58 @@ class PositionManager:
                 UserRoleDepartmentUUID=UserRoleDepartmentUUID
             ).values_list('PositionUUID', flat=True)
         )
+
+    @staticmethod
+    def GetUrdPositionRowsForUrds(URDUUIDs):
+        """批量取多个 URD 的职务子表行（无效项自动跳过）
+
+        Args:
+            URDUUIDs: UserRoleDepartmentUUID 集合（bytes/str/UUIDObj 均可）
+
+        Returns:
+            list[UserRoleDepartmentPosition]
+        """
+        urd_uuids = []
+        for u in (URDUUIDs or []):
+            if not u:
+                continue
+            try:
+                urd_uuids.append(UUIDObj(u).bytes)
+            except Exception:
+                continue
+        if not urd_uuids:
+            return []
+        return list(
+            UserRoleDepartmentPosition.objects.filter(UserRoleDepartmentUUID__in=urd_uuids)
+        )
+
+    @staticmethod
+    def GetPositionNameMap(PositionUUIDs):
+        """批量获取 PositionUUID(bytes) → PositionName 映射（仅含存在的职务）
+
+        Args:
+            PositionUUIDs: UUID 集合（bytes/str/UUIDObj 混合均可）
+
+        Returns:
+            dict[bytes, str]：键为 UUID 的 16 字节形式，与调用方字节键对齐
+        """
+        uuids = []
+        for u in (PositionUUIDs or []):
+            if not u:
+                continue
+            try:
+                uuids.append(UUIDObj(u).bytes)
+            except Exception:
+                continue
+        if not uuids:
+            return {}
+        result = {}
+        for p in Position.objects.filter(PositionUUID__in=uuids):
+            try:
+                result[p.PositionUUID.bytes] = p.PositionName
+            except AttributeError:
+                result[UUIDObj(p.PositionUUID).bytes] = p.PositionName
+        return result
 
     @staticmethod
     def GetHeldPositionUUIDs():
@@ -2605,6 +2679,34 @@ class DepartmentManager:
         except Exception:
             return Department.objects.none()
         return Department.objects.filter(CompanyUUID=comp_bytes)
+
+    @staticmethod
+    def GetDepartmentNameMap(DeptUUIDs):
+        """批量获取 DeptUUID(bytes) → DeptName 映射（仅含存在的部门）
+
+        Args:
+            DeptUUIDs: UUID 集合（bytes/str/UUIDObj 混合均可）
+
+        Returns:
+            dict[bytes, str]：键为 UUID 的 16 字节形式，与调用方字节键对齐
+        """
+        uuids = []
+        for u in (DeptUUIDs or []):
+            if not u:
+                continue
+            try:
+                uuids.append(UUIDObj(u).bytes)
+            except Exception:
+                continue
+        if not uuids:
+            return {}
+        result = {}
+        for d in Department.objects.filter(DeptUUID__in=uuids):
+            try:
+                result[d.DeptUUID.bytes] = d.DeptName
+            except AttributeError:
+                result[UUIDObj(d.DeptUUID).bytes] = d.DeptName
+        return result
 
     @staticmethod
     def GetDepartmentsForUser(UserUUID):
