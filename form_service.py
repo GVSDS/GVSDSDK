@@ -187,25 +187,39 @@ class FormServiceBase:
             return 'select'
         return mapping.get(t, 'text')
 
-    def GetTables(self):
-        # 性能优化：使用 Django cache 缓存 count（TTL 300 秒），避免每次列表请求
-        # 都触发 N 次 COUNT 查询。count 失败时返回 -1 但不缓存，下次仍会尝试查询。
+    @staticmethod
+    def CachedTableCount(Name, Model, TTL=300):
+        """带缓存的表行数（供表清单展示，避免每次列表请求触发 N 次 COUNT）
+
+        Args:
+            Name: 缓存键使用的表名
+            Model: 目标模型
+            TTL: 缓存秒数
+
+        Returns:
+            int：行数；查询失败返回 -1（不缓存，下次仍会重试）
+        """
         from django.core.cache import cache
+        cache_key = f'form_service:count:{Name}'
+        try:
+            count = cache.get(cache_key)
+            if count is None:
+                count = Model.objects.count()
+                cache.set(cache_key, count, TTL)
+            return count
+        except (DatabaseError, TypeError, ValueError) as e:
+            logger.warning('CachedTableCount: %s count 失败: %s', Name, e)
+            return -1
+
+    def GetTables(self):
+        # 性能优化：表行数走 CachedTableCount（TTL 300 秒），避免每次列表请求
+        # 都触发 N 次 COUNT 查询。count 失败时返回 -1 但不缓存，下次仍会尝试查询。
         tables = []
         for name, model in self.TABLE_MAP.items():
-            cache_key = f'form_service:count:{name}'
-            try:
-                count = cache.get(cache_key)
-                if count is None:
-                    count = model.objects.count()
-                    cache.set(cache_key, count, 300)
-            except (DatabaseError, TypeError, ValueError) as e:
-                logger.warning('GetTables: %s count 失败: %s', name, e)
-                count = -1
             tables.append({
                 'name': name,
                 'title': name,
-                'count': count,
+                'count': self.CachedTableCount(name, model),
                 'type': 'dynamic',
                 'source': 'model',
             })

@@ -248,6 +248,157 @@ class RoleManager:
         ).first()
 
     @staticmethod
+    def GetUserRoleByUUID(UserRoleUUID):
+        """按 UserRoleUUID 查询「用户-角色」关联行（不存在返回 None）"""
+        if not UserRoleUUID:
+            return None
+        return UserRole.objects.filter(UserRoleUUID=UUIDObj(UserRoleUUID).bytes).first()
+
+    @staticmethod
+    def GetUserRoleDepartmentForCompany(UserRoleUUID, CompanyUUID=None):
+        """按 (UserRoleUUID[, CompanyUUID]) 查询部门归属（不存在返回 None）"""
+        if not UserRoleUUID:
+            return None
+        qs = UserRoleDepartment.objects.filter(UserRoleUUID=UUIDObj(UserRoleUUID).bytes)
+        if CompanyUUID is not None:
+            try:
+                qs = qs.filter(CompanyUUID=UUIDObj(CompanyUUID).bytes)
+            except Exception:
+                qs = qs.filter(CompanyUUID=CompanyUUID)
+        return qs.first()
+
+    @staticmethod
+    def EnsureUserRoleDepartment(UserRoleUUID, DeptUUID, TenantUUID=None, CompanyUUID=None,
+                                 RoleType=0, MatchCompany=False):
+        """把「用户-角色」关联的部门归属建好或改到目标部门
+
+        「用户-角色」与部门是一对一主关联（同一 UserRoleUUID 只保留一条 URD 行），
+        故存在则改 DeptUUID，不存在则新建。
+
+        Args:
+            UserRoleUUID: 用户-角色关联 UUID
+            DeptUUID: 目标部门 UUID
+            TenantUUID/CompanyUUID: 新建时的归属，可按需传入
+            RoleType: 角色类型（默认 0）
+            MatchCompany: True 时按 (UserRoleUUID, CompanyUUID) 定位既有行（多公司各自成行），
+                          False（默认）只按 UserRoleUUID 定位
+
+        Returns:
+            UserRoleDepartment 实例
+        """
+        urd = RoleManager.GetUserRoleDepartmentForCompany(
+            UserRoleUUID, CompanyUUID if MatchCompany else None,
+        )
+        dept_bytes = UUIDObj(DeptUUID).bytes
+        if urd is None:
+            return UserRoleDepartment.objects.create(
+                UserRoleDepartmentUUID=uuid.uuid4().bytes,
+                UserRoleUUID=UUIDObj(UserRoleUUID).bytes,
+                DeptUUID=dept_bytes,
+                TenantUUID=TenantUUID,
+                CompanyUUID=CompanyUUID,
+                RoleType=RoleType,
+            )
+        urd.DeptUUID = dept_bytes
+        urd.save(update_fields=['DeptUUID'])
+        return urd
+
+    @staticmethod
+    def HasUserRoleDepartment(UserRoleUUID, DeptUUID, CompanyUUID=None):
+        """该「用户-角色」关联是否已归属指定部门（可按公司收窄）"""
+        qs = UserRoleDepartment.objects.filter(
+            UserRoleUUID=UUIDObj(UserRoleUUID).bytes,
+            DeptUUID=UUIDObj(DeptUUID).bytes,
+        )
+        if CompanyUUID is not None:
+            try:
+                qs = qs.filter(CompanyUUID=UUIDObj(CompanyUUID).bytes)
+            except Exception:
+                qs = qs.filter(CompanyUUID=CompanyUUID)
+        return qs.exists()
+
+    @staticmethod
+    def HasUserRoleWorkgroup(UserRoleUUID, WorkgroupUUID, CompanyUUID=None):
+        """该「用户-角色」关联是否已归属指定工作组（可按公司收窄）"""
+        qs = UserRoleWorkgroup.objects.filter(
+            UserRoleUUID=UUIDObj(UserRoleUUID).bytes,
+            WorkgroupUUID=UUIDObj(WorkgroupUUID).bytes,
+        )
+        if CompanyUUID is not None:
+            try:
+                qs = qs.filter(CompanyUUID=UUIDObj(CompanyUUID).bytes)
+            except Exception:
+                qs = qs.filter(CompanyUUID=CompanyUUID)
+        return qs.exists()
+
+    @staticmethod
+    def UserRoleRelationExists(UserUUID, RoleUUID, ExcludeUserRoleUUID=None, CompanyUUID=None):
+        """该 (用户, 角色) 关联是否已存在（供表单编辑查重）
+
+        Args:
+            UserUUID/RoleUUID: 目标用户与角色
+            ExcludeUserRoleUUID: 排除自身记录（编辑场景必传，否则会与自身冲突）
+            CompanyUUID: 可选，限定公司范围
+        """
+        qs = UserRole.objects.filter(
+            UserUUID=UUIDObj(UserUUID).bytes,
+            RoleUUID=UUIDObj(RoleUUID).bytes,
+        )
+        if CompanyUUID is not None:
+            try:
+                qs = qs.filter(CompanyUUID=UUIDObj(CompanyUUID).bytes)
+            except Exception:
+                qs = qs.filter(CompanyUUID=CompanyUUID)
+        if ExcludeUserRoleUUID is not None:
+            qs = qs.exclude(UserRoleUUID=UUIDObj(ExcludeUserRoleUUID).bytes)
+        return qs.exists()
+
+    @staticmethod
+    def _NormalizeUUIDs(Values):
+        """UUID 集合归一化为 bytes 列表（无效项跳过；无有效值返回空列表）"""
+        uuids = []
+        for v in (Values or []):
+            if not v:
+                continue
+            try:
+                uuids.append(UUIDObj(v).bytes)
+            except Exception:
+                continue
+        return uuids
+
+    @staticmethod
+    def GetUserRoleDepartmentsByUUIDs(UserRoleDepartmentUUIDs):
+        """批量按 URD 主键取部门归属行"""
+        uuids = RoleManager._NormalizeUUIDs(UserRoleDepartmentUUIDs)
+        if not uuids:
+            return []
+        return list(UserRoleDepartment.objects.filter(UserRoleDepartmentUUID__in=uuids))
+
+    @staticmethod
+    def GetUserRoleDepartmentsByDeptUUIDs(DeptUUIDs):
+        """批量按部门取部门归属行（部门列表页成员）"""
+        uuids = RoleManager._NormalizeUUIDs(DeptUUIDs)
+        if not uuids:
+            return []
+        return list(UserRoleDepartment.objects.filter(DeptUUID__in=uuids))
+
+    @staticmethod
+    def GetUserRoleWorkgroupsByUUIDs(UserRoleWorkgroupUUIDs):
+        """批量按 URW 主键取工作组归属行"""
+        uuids = RoleManager._NormalizeUUIDs(UserRoleWorkgroupUUIDs)
+        if not uuids:
+            return []
+        return list(UserRoleWorkgroup.objects.filter(UserRoleWorkgroupUUID__in=uuids))
+
+    @staticmethod
+    def GetUserRoleWorkgroupsByWorkgroupUUIDs(WorkgroupUUIDs):
+        """批量按工作组取工作组归属行（工作组列表页成员）"""
+        uuids = RoleManager._NormalizeUUIDs(WorkgroupUUIDs)
+        if not uuids:
+            return []
+        return list(UserRoleWorkgroup.objects.filter(WorkgroupUUID__in=uuids))
+
+    @staticmethod
     def GetUserRoleDepartments(UserRoleUUID, CompanyUUID=None, RoleType=None):
         """按 UserRoleUUID 查询部门归属列表（一个用户-角色对可挂多个部门）
 
