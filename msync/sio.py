@@ -590,4 +590,9 @@ def on_app_manifest_report(sid, data):
 
 
 def create_sio_app(django_app):
+    # 注册用户级命名空间 /talk（导入即完成事件注册）
+    try:
+        import gvsdsdk.talk_socket  # noqa: F401
+    except Exception:
+        logger.exception('[SIO] talk 命名空间注册失败')
     return socketio.WSGIApp(sio, django_app)
