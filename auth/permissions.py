@@ -53,6 +53,28 @@ class IsAdminUser(BasePermission):
         return IsAdmin(request)
 
 
+class IsCompanyAdminUser(BasePermission):
+    """仅允许公司管理员及以上访问（admin:company / admin:tenant / admin:super）
+
+    三级管理员体系（由窄到宽）：
+    - ``admin:company``：公司管理员，按 RolePermission.CompanyUUID 绑定到具体公司后生效
+    - ``admin:tenant`` ：租户内管理员，自动继承公司管理员能力
+    - ``admin:super``  ：跨租户管理员，天然具备
+
+    判定委托给 ``gvsdsdk.auth.admin_service.IsCompanyAdmin``。本类只负责"能不能进"，
+    数据范围收窄（本公司/本租户/全部）由视图按 IsSuperAdmin/IsTenantAdmin 另行计算。
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if not isinstance(user, _GetUserModel()):
+            return False
+        from gvsdsdk.auth.admin_service import IsCompanyAdmin
+        return IsCompanyAdmin(request)
+
+
 class IsCompanyMember(BasePermission):
     """验证用户当前角色属于目标数据所在公司
 

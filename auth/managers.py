@@ -3257,12 +3257,32 @@ class AppManager:
         return True
 
     @staticmethod
-    def ListPendingApplications(TenantUUID):
+    def ListPendingApplications(AllowedCompanyUUIDs=None):
         """待审批的个人授权申请（ApplyStatus=1，按申请时间倒序）
 
-        说明：UserApp 表无租户列，租户隔离由上层承担（保持既有行为）。
+        数据范围：UserApp 表无租户/公司列，作用域按「申请人所属公司」反查
+        （UserRole.CompanyUUID）。由调用方按管理员级别显式传参：
+            - ``AllowedCompanyUUIDs=None``    → 不限制（平台管理员 admin:super）
+            - ``AllowedCompanyUUIDs=[]``      → 无任何可管辖公司，返回空
+            - ``AllowedCompanyUUIDs=[...]``   → 仅申请人的公司命中该集合的申请
+
+        注意：此前签名是 ``(TenantUUID)`` 但**传入值被完全忽略**，导致任何租户
+        管理员都能看到全平台待审申请（跨租户泄漏）。现改为显式范围参数，不再
+        接受会被静默忽略的租户参数。
         """
-        return list(UserApp.objects.filter(ApplyStatus=1).order_by('-ApplyTime'))
+        qs = UserApp.objects.filter(ApplyStatus=1).order_by('-ApplyTime')
+        if AllowedCompanyUUIDs is not None:
+            allowed = [c for c in AllowedCompanyUUIDs if c]
+            if not allowed:
+                return []
+            # 用子查询在 SQL 侧完成「申请人属于可管辖公司」过滤，避免 Python 侧
+            # UUIDObj/bytes 混比（两者 hash 不同，曾因此导致判定恒为 False）
+            qs = qs.filter(
+                UserUUID__in=UserRole.objects.filter(
+                    CompanyUUID__in=allowed,
+                ).values('UserUUID')
+            )
+        return list(qs)
 
     # ==================== 应用配置（AppConfig 键值表） ====================
 
