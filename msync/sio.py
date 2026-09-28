@@ -38,22 +38,44 @@
 import logging
 import threading
 import traceback
+import urllib.parse
 import socketio
 
 logger = logging.getLogger(__name__)
 
 NS = '/msync'
 
-sio = socketio.Server(async_mode='gevent', cors_allowed_origins=[
-    'https://*.gvsds.com',
-    'https://*.gvsds.dev',
-    'https://*.yc8z.org',
-    'https://*.ycbz.org',
-    'https://*.gvsds.org',
-    'https://*.gvsds.studio',
-    'http://localhost:*',
-    'http://127.0.0.1:*',
-], logger=True, engineio_logger=True)
+#: 允许的前端来源根域（含其全部子域）——浏览器 WebSocket 握手会带 Origin，必须显式放行
+ALLOWED_ORIGIN_ROOTS = (
+    'gvsds.com', 'gvsds.dev', 'gvsds.org', 'gvsds.studio', 'yc8z.org', 'ycbz.org',
+)
+#: 本地开发来源主机（任意端口）
+ALLOWED_ORIGIN_HOSTS = ('localhost', '127.0.0.1')
+
+
+def AllowOrigin(origin, environ=None):
+    """CORS Origin 校验（供 engineio 以可调用对象方式调用）
+
+    背景：engineio 的 cors_allowed_origins 只支持「精确字符串 / '*' / 可调用对象」，
+    不支持 'https://*.gvsds.com' 这类通配写法——那样写会被当成字面量，
+    浏览器端（如 https://gerp.gvsds.com）握手会被判为 "not an accepted origin"。
+    这里按根域后缀统一放行，涵盖 gerp/www/api/viper 等全部子域。
+    """
+    if not origin:
+        return False
+    try:
+        host = (urllib.parse.urlsplit(origin).hostname or '').lower()
+    except ValueError:
+        return False
+    if not host:
+        return False
+    if host in ALLOWED_ORIGIN_HOSTS:
+        return True
+    return any(host == root or host.endswith('.' + root) for root in ALLOWED_ORIGIN_ROOTS)
+
+
+sio = socketio.Server(async_mode='gevent', cors_allowed_origins=AllowOrigin,
+                      logger=True, engineio_logger=True)
 
 _sid_service_map = {}
 _service_sid_map = {}
