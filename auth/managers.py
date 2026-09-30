@@ -383,6 +383,35 @@ class RoleManager:
         return list(UserRoleDepartment.objects.filter(DeptUUID__in=uuids))
 
     @staticmethod
+    def QueryUserRoleDepartmentsByCompany(CompanyUUID, DeptUUIDs=None):
+        """按公司查询「部门-员工」关联行（UserRoleDepartment）
+
+        供「部门-员工」选择器（如员工档案直接绑部门-员工关系）在显式指定公司时
+        强制收窄数据范围（超管也不豁免）。CompanyUUID 缺失或非法返回空集，
+        不退化成全表查询。
+
+        Args:
+            CompanyUUID: 公司 UUID（bytes/str/UUIDObj）
+            DeptUUIDs: 可选，进一步按部门收窄（无效项跳过）
+
+        Returns:
+            QuerySet[UserRoleDepartment]
+        """
+        if not CompanyUUID:
+            return UserRoleDepartment.objects.none()
+        try:
+            comp_bytes = UUIDObj(CompanyUUID).bytes
+        except Exception:
+            return UserRoleDepartment.objects.none()
+        qs = UserRoleDepartment.objects.filter(CompanyUUID=comp_bytes)
+        if DeptUUIDs:
+            dept_bytes = RoleManager._NormalizeUUIDs(DeptUUIDs)
+            if not dept_bytes:
+                return UserRoleDepartment.objects.none()
+            qs = qs.filter(DeptUUID__in=dept_bytes)
+        return qs
+
+    @staticmethod
     def GetUserRoleWorkgroupsByUUIDs(UserRoleWorkgroupUUIDs):
         """批量按 URW 主键取工作组归属行"""
         uuids = RoleManager._NormalizeUUIDs(UserRoleWorkgroupUUIDs)
