@@ -24,6 +24,7 @@ import logging
 from django.db import DatabaseError
 from django.db.models import Q
 from django.db.models.fields import NOT_PROVIDED
+from django.utils import timezone as django_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,22 @@ class FormServiceBase:
                 return dt
             except (ValueError, TypeError):
                 return val
+        if field_type == 'DateField' and isinstance(val, str):
+            # 兼容把日期选择器绑成 Date 对象后序列化出的 ISO 时刻
+            # （如 2019-08-31T16:00:00.000Z，其实是本地 2019-09-01）：
+            # 纯日期串直接解析；带时区的按项目时区还原日历日期，
+            # 避免 UTC 日期比用户所选日期少一天。
+            try:
+                return datetime.date.fromisoformat(val)
+            except (ValueError, TypeError):
+                pass
+            try:
+                dt = datetime.datetime.fromisoformat(val)
+            except (ValueError, TypeError):
+                return val
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(django_timezone.get_current_timezone())
+            return dt.date()
         if field_type in ('BooleanField', 'NullBooleanField') and isinstance(val, str):
             low = val.strip().lower()
             if low in ('true', '1', 't', 'yes'):
