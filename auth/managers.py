@@ -4,7 +4,7 @@ from django.db.models import Q
 from django.utils import timezone as _timezone
 
 from gvsdsdk.models import Role, UserRole, UserRoleDepartment, UserRoleDepartmentPosition, UserRoleWorkgroup, RolePermission, Permission, Position, PositionCategory, PositionTemplate, PositionTemplatePermission, AppPosition, AppVirtualPosition, AppVirtualBinding, App, TenantApp, CompanyApp, UserApp, AppConfig, Shop, RoleShop, User2FA, UserAvatar, Password, UserPending2FA, AccountActivation, Tenant, Company, Department, DepartmentSMTM, Workgroup, Message, Menu, WorkOrder, AuditLog, ItemReference, Backpack, FileAsset, CompanyInfo
-from gvsdsdk.auth.crypto import HashPassword, VerifyPassword
+from gvsdsdk.auth.crypto import HashPassword
 from gvsdsdk.model_utils import _GetUserModel, UUIDObj
 
 # 系统公司 UUID（00000000-0000-0000-0000-000000000001），全局唯一
@@ -2527,7 +2527,11 @@ class AdminUserManager:
 
     @staticmethod
     def ResetPassword(UserUUID, NewPassword):
-        """重置用户密码（写入独立 Password 表，bcrypt 哈希）
+        """重置用户密码
+
+        必须**同时**写 `User` 表的登录密码与 `Password` 审计表：
+        登录校验（LoginView → User.CheckPassword）读的是 `User.UserPassword`，
+        旧实现只写审计表，导致返回「重置成功」但实际登录密码并未改变。
 
         Returns:
             (成功?, 消息)
@@ -2535,6 +2539,8 @@ class AdminUserManager:
         user = AuthManager.GetUserByUUID(UserUUID)
         if user is None:
             return False, '用户不存在'
+        user.SetPassword(NewPassword)
+        user.save(update_fields=['UserPassword'])
         pw_obj, _ = Password.objects.get_or_create(UserUUID=user.UserUUID)
         pw_obj.Password = HashPassword(NewPassword)
         pw_obj.save(update_fields=['Password'])
@@ -2542,21 +2548,28 @@ class AdminUserManager:
 
     @staticmethod
     def VerifyPassword(UserUUID, PlainPassword):
-        """校验用户密码（独立 Password 表）
+        """校验用户密码
 
-        注意：形参**不能**叫 `Password` —— 会遮蔽模块级导入的 `Password` 模型
+        以 **User 表自身的登录密码**（bcrypt）为准 —— 与登录流程（LoginView 的
+        `User.CheckPassword`）同源，保证「登录能过 = 校验能过」。
+
+        旧实现查 `Password` 审计表并用 bcrypt 比对，但该表按设计是**明文审计副本**
+        （见 ChangePasswordAudit 的说明），bcrypt 比对必然抛 ValueError 被吞成 False，
+        导致任何输入都被判为「密码不匹配」。
+
+        注意：形参名不能叫 `Password` —— 会遮蔽模块级导入的 `Password` 模型
         （`Password.objects` 会变成对 str 取属性，抛 AttributeError）。
 
         Returns:
             (用户记录存在?, 密码是否匹配)
         """
-        pw_obj = Password.objects.filter(UserUUID=UUIDObj(UserUUID).bytes).first()
-        if pw_obj is None:
+        user = AuthManager.GetUserByUUID(UserUUID)
+        if user is None:
             return False, False
-        try:
-            return True, VerifyPassword(PlainPassword, pw_obj.Password)
-        except (ValueError, TypeError):
+        if not PlainPassword:
             return True, False
+        # User.CheckPassword 内部已捕获异常并返回 False
+        return True, bool(user.CheckPassword(PlainPassword))
 
     @staticmethod
     def SetAccountLicense(UserUUID, License):
