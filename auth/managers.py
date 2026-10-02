@@ -2541,8 +2541,11 @@ class AdminUserManager:
         return True, '密码重置成功'
 
     @staticmethod
-    def VerifyPassword(UserUUID, Password):
+    def VerifyPassword(UserUUID, PlainPassword):
         """校验用户密码（独立 Password 表）
+
+        注意：形参**不能**叫 `Password` —— 会遮蔽模块级导入的 `Password` 模型
+        （`Password.objects` 会变成对 str 取属性，抛 AttributeError）。
 
         Returns:
             (用户记录存在?, 密码是否匹配)
@@ -2551,7 +2554,7 @@ class AdminUserManager:
         if pw_obj is None:
             return False, False
         try:
-            return True, VerifyPassword(Password, pw_obj.Password)
+            return True, VerifyPassword(PlainPassword, pw_obj.Password)
         except (ValueError, TypeError):
             return True, False
 
