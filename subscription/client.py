@@ -109,6 +109,34 @@ class SubscriptionClient:
         headers = {'Authorization': f'Bearer {token}'}
         return self._HttpRequest(Method, Path, Json=Json, Params=Params, Headers=headers)
 
+    # ── 提供者子服务器业务操作（ApiKey + 密钥 换取令牌后调用） ──────────
+
+    def Ping(self):
+        """鉴权连通性探测（验证 ApiKey+密钥 可正常换取令牌并访问提供者接口）"""
+        return self._CallProvider('GET', '/API/Subscription/Provider/Ping')
+
+    def DeclareCustomPage(self, RemoteEntry, RemoteModule='default'):
+        """声明本产品定制页的远端入口（幂等覆盖）
+
+        消费者在「我的订阅」里打开该产品时，GERP 宿主前端按 RemoteEntry 运行时
+        加载远端组件并原生渲染（微服务前端；跨源需该 URL 提供 CORS）。
+
+        Returns:
+            dict：{'GroupUUID', 'GroupName', 'RemoteEntry', 'RemoteModule'}
+        """
+        return self._CallProvider(
+            'POST', '/API/Subscription/Provider/Page/Save',
+            Json={'RemoteEntry': RemoteEntry, 'RemoteModule': RemoteModule},
+        )
+
+    def _CallProvider(self, Method, Path, Json=None):
+        """调用提供者接口并解包 {code, msg, data}（code!=0 抛 SubscriptionClientError）"""
+        payload = self.Request(Method, Path, Json=Json)
+        if not isinstance(payload, dict) or payload.get('code') != 0:
+            msg = (payload or {}).get('msg') if isinstance(payload, dict) else ''
+            raise SubscriptionClientError(msg or '主服务器返回失败', ResponseBody=payload)
+        return payload.get('data')
+
     # ── 内部：HTTP 收发 ────────────────────────────────────────────
 
     def _HttpRequest(self, Method, Path, Json=None, Params=None, Headers=None):
